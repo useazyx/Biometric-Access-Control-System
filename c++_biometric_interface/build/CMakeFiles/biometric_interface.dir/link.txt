@@ -1,0 +1,1 @@
+/usr/bin/c++ CMakeFiles/biometric_interface.dir/src/main.cpp.o CMakeFiles/biometric_interface.dir/src/sensor_communication.cpp.o CMakeFiles/biometric_interface.dir/src/typescript_interface.cpp.o CMakeFiles/biometric_interface.dir/src/python_interface.cpp.o -o biometric_interface  -lcurl 

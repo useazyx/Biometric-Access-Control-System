@@ -1,0 +1,250 @@
+
+/**
+ * schema.prisma - Define como a gente guarda os dados do sistema de biometria da ETEC/FATEC
+ * # Pra que serve?
+ * - Organiza os dados da escola (alunos, professores, etc.)
+ * - Controla o acesso por biometria e registra quem entra e sai
+ * Feito por: Arthur Roberto Weege Pontes
+ * Versão: 1.3.2
+ * Data: 2025-07-20 (Correção final de exclusão em cascata)
+ * Alterações:
+ * - v1.3.2 (2025-07-20): Remoção de onDelete incorretos no modelo Employee
+ */
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Tipos de escola: Fatec (faculdade de tecnologia) ou Etec (escola técnica)
+enum UnitType {
+  Fatec
+  Etec
+}
+
+// Lista de dedos que a gente usa pra biometria (polegar, indicador, etc.)
+enum Finger {
+  thumb_right
+  index_right
+  middle_right
+  ring_right
+  pinky_right
+  thumb_left
+  index_left
+  middle_left
+  ring_left
+  pinky_left
+}
+
+// Tipos de pessoa: aluno, professor, funcionário, etc.
+enum PersonType {
+  student
+  teacher
+  employee
+  coordinator
+  inspector
+  visitor
+}
+
+// Períodos de aula: manhã, tarde, noite ou o dia todo (integral)
+enum Period {
+  morning
+  afternoon
+  night
+  integral
+}
+
+// Status do aluno: tá ativo, inativo ou foi transferido
+enum StudentStatus {
+  active
+  inactive
+  transferred
+}
+
+// Eventos de acesso: entrada ou saída
+enum EventType {
+  entry
+  exit
+}
+
+// Guarda as escolas (unidades) - cada uma tem um código único e pode ser extensão
+model Unit {
+  id           Int      @id @default(autoincrement())
+  name         String   @db.VarChar(50)
+  unit_type    UnitType
+  address      String?  @db.Text
+  phone        String?  @db.VarChar(20)
+  unit_code    String   @unique @db.VarChar(6)
+  is_extension Boolean  @default(false)
+
+  biometrics Biometric[]
+  people     Person[]
+
+  biometric_logs BiometricLog[]
+  web_access_logs WebAccessLog[]
+}
+
+// Define as funções (cargos) e o que cada um pode fazer (nível de permissão de 0 a 10)
+model Role {
+  id               Int     @id @default(autoincrement())
+  name             String  @unique @db.VarChar(50)
+  permission_level Int     @default(0)
+  description      String? @db.Text
+
+  employees Employee[]
+}
+
+// Cadastra as pessoas (alunos, professores, etc.) - cada uma tem CPF único e senha segura
+model Person {
+  id                 Int        @id @default(autoincrement())
+  full_name          String     @db.VarChar(100)
+  birth_date         DateTime?  @db.Date
+  cpf                String     @unique @db.VarChar(14)
+  email              String     @unique @db.VarChar(100)
+  phone              String?    @db.VarChar(20)
+  type               PersonType
+  main_unit_type     UnitType
+  system_access_hash String?    @db.VarChar(60)
+  temporary_password String?    @db.Text
+  password_reset_at  DateTime?
+
+  registration_unit    Unit               @relation(fields: [registration_unit_id], references: [id])
+  registration_unit_id Int
+  biometrics           PeopleBiometrics[]
+  student              Student?
+  employee             Employee?
+  visitor              Visitor?           @relation("PersonVisitor")
+  biometric_logs       BiometricLog[]
+  web_access_logs      WebAccessLog[]
+  tokens               Token[]
+}
+
+// Guarda a digital (dados biométricos) de cada pessoa
+model Biometric {
+  id                Int      @id @default(autoincrement())
+  template          Bytes
+  finger            Finger
+  registration_date DateTime @default(now())
+  device            String?  @default("R307") @db.VarChar(50)
+
+  registration_unit    Unit               @relation(fields: [registration_unit_id], references: [id])
+  registration_unit_id Int
+  people               PeopleBiometrics[]
+}
+
+// Informações específicas dos alunos: RM (registro), período, curso, etc.
+model Student {
+  id          Int           @id @default(autoincrement())
+  rm          String        @unique @db.VarChar(20)
+  period      Period
+  course      String?       @db.VarChar(50)
+  class       String?       @db.VarChar(20)
+  responsible String?       @db.VarChar(100)
+  status      StudentStatus @default(active)
+
+  person    Person @relation(fields: [person_id], references: [id], onDelete: Cascade)
+  person_id Int    @unique
+}
+
+// Cadastrp de funcionários
+model Employee {
+  id                  Int       @id @default(autoincrement())
+  registration_number String    @unique @db.VarChar(20)
+  admission_date      DateTime? @db.Date
+  active              Boolean   @default(true)
+
+  person               Person    @relation(fields: [person_id], references: [id], onDelete: Cascade)
+  person_id            Int       @unique
+  role                 Role      @relation(fields: [role_id], references: [id])
+  role_id              Int
+  teacher              Teacher?
+  responsible_visitors Visitor[] @relation("ResponsibleEmployee")
+}
+
+// Detalhes dos professores: matérias que ensinam e onde podem dar aula (Fatec ou Etec)
+model Teacher {
+  id              Int      @id @default(autoincrement())
+  subjects        String[]
+  can_teach_fatec Boolean  @default(false)
+  can_teach_etec  Boolean  @default(false)
+
+  employee    Employee @relation(fields: [employee_id], references: [id], onDelete: Cascade)
+  employee_id Int      @unique
+}
+
+// Informações dos visitantes: empresa, motivo e até quando podem entrar
+model Visitor {
+  id                Int       @id @default(autoincrement())
+  company           String?   @db.VarChar(100)
+  visit_reason      String?   @db.Text
+  registration_date DateTime  @default(now()) @db.Date
+  visit_expiry_date DateTime? @db.Date
+
+  person                  Person    @relation(name: "PersonVisitor", fields: [person_id], references: [id], onDelete: Cascade)
+  person_id               Int       @unique
+  responsible_employee    Employee? @relation(name: "ResponsibleEmployee", fields: [responsible_employee_id], references: [id], onDelete: SetNull)
+  responsible_employee_id Int?
+}
+
+// Liga as pessoas às suas digitais (uma pessoa pode ter várias digitais cadastradas)
+model PeopleBiometrics {
+  person_id    Int
+  biometric_id Int
+
+  person    Person    @relation(fields: [person_id], references: [id], onDelete: Cascade)
+  biometric Biometric @relation(fields: [biometric_id], references: [id], onDelete: Cascade)
+
+  @@id([person_id, biometric_id])
+}
+
+// Nova tabela para logs de acesso biométrico
+model BiometricLog {
+  id               Int       @id @default(autoincrement())
+  access_time      DateTime  @default(now()) @db.Timestamptz
+  event_type       EventType @default(entry)
+  biometric_device String?   @default("R307") @db.VarChar(50)
+  is_authorized    Boolean   @default(false)
+
+  person    Person? @relation(fields: [person_id], references: [id], onDelete: Cascade)
+  person_id Int?
+  unit      Unit    @relation(fields: [unit_id], references: [id])
+  unit_id   Int
+}
+
+// Nova tabela para logs de acesso web (login/logout)
+model WebAccessLog {
+  id                    Int       @id @default(autoincrement())
+  login_time            DateTime  @default(now()) @db.Timestamptz
+  logout_time           DateTime? @db.Timestamptz
+  session_duration_minutes Int? // Duração da sessão em minutos
+  event_type            EventType // entry para login, exit para logout
+
+  person    Person? @relation(fields: [person_id], references: [id], onDelete: Cascade)
+  person_id Int?
+  unit      Unit    @relation(fields: [unit_id], references: [id])
+  unit_id   Int
+}
+
+// Tokens pra resetar senha - cada um tem prazo de validade
+model Token {
+  id         Int      @id @default(autoincrement())
+  token      String   @db.Text
+  expiration DateTime
+  used       Boolean  @default(false)
+
+  person    Person @relation(fields: [person_id], references: [id], onDelete: Cascade)
+  person_id Int
+}
+
+// Lista de tokens que já foram usados ou expiraram (não podem mais ser usados)
+model TokenBlacklist {
+  id         Int      @id @default(autoincrement())
+  token      String   @unique @db.Text
+  expiration DateTime
+  added_at   DateTime @default(now())
+}
+

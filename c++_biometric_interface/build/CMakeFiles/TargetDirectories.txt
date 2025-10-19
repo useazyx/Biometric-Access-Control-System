@@ -1,0 +1,3 @@
+/home/ubuntu/biometricaccesssystem/c++_biometric_interface/build/CMakeFiles/biometric_interface.dir
+/home/ubuntu/biometricaccesssystem/c++_biometric_interface/build/CMakeFiles/edit_cache.dir
+/home/ubuntu/biometricaccesssystem/c++_biometric_interface/build/CMakeFiles/rebuild_cache.dir
