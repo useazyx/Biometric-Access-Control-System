@@ -98,7 +98,7 @@ cd biometricaccesssystem
 ### 2. Configurar banco de dados
 ```bash
 # No diretório principal do projeto
-pnpm install # Instala dependências do backend TypeScript
+npm install # Instala dependências do backend TypeScript
 npx prisma generate
 npx prisma db push
 ```
@@ -106,7 +106,7 @@ npx prisma db push
 ### 3. Backend TypeScript (API)
 ```bash
 # No diretório principal do projeto
-pnpm run dev
+npm run dev
 ```
 Servidor disponível em `http://localhost:3000` (ou porta configurada no `.env`)
 
@@ -120,7 +120,7 @@ pip install -r requirements.txt
 cp .env.example .env
 # Editar .env com suas configurações de banco de dados e sensor
 
-# Executar em modo simulação (para testes sem sensor físico)
+# Executar em modo simulação (para testes sem sensor real)
 python main.py --mode simulation --unit ETEC01
 
 # Executar em modo produção (com sensor R307 real)
@@ -131,8 +131,8 @@ python main.py --mode listener --unit ETEC01
 ```bash
 # No diretório frontend
 cd frontend
-pnpm install
-pnpm run dev
+npm install
+npm run dev
 ```
 Interface disponível em `http://localhost:5173` (ou porta configurada no `.env`)
 
