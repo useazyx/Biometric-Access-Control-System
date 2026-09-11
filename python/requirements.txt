@@ -1,0 +1,20 @@
+# requirements.txt - Dependências do módulo Python
+# Pra que serve?
+# - Listar tudo que o sistema de consulta biométrica precisa pra rodar
+# - Versão fixada, pra não quebrar quando a biblioteca mudar lá na frente
+#
+# Como instalar:
+#   pip install -r requirements.txt
+
+# Banco de dados PostgreSQL (o mesmo banco que o backend TypeScript usa)
+psycopg2-binary==2.9.10
+
+# Lê as variáveis do arquivo .env
+python-dotenv==1.1.1
+
+# Comunicação serial com o sensor biométrico R307
+pyserial==3.5
+
+# API HTTP local, que o módulo C++ chama pra consultar uma digital
+fastapi==0.115.6
+uvicorn==0.34.0
