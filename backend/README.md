@@ -74,19 +74,22 @@ linha em `Alterações:`.
 
 ```bash
 npm install
-
-cp .env.example .env
-# Preencha DATABASE_URL e JWT_SECRET. Pra gerar o segredo:
-#   node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
-
-npm run db:deploy   # aplica as migrações
-npm run db:seed     # cria unidade, cargos e o administrador
+cp .env.example .env   # já vem preenchido pra um PostgreSQL local padrão
 npm run dev
 ```
 
-O seed imprime o e-mail e a senha do administrador no terminal. **Anote a senha:** ela
-aparece uma vez só. Pra escolher a senha você mesmo, defina `SEED_ADMIN_PASSWORD` no
-`.env` antes de rodar.
+É só isso. O `npm run dev` chama o `scripts/setup-db.ts` antes de ligar a API, e ele:
+
+1. cria o banco do `DATABASE_URL` se ele ainda não existir;
+2. aplica as migrações pendentes (`prisma migrate deploy`);
+3. roda o seed, que usa `upsert` e por isso pode rodar toda vez sem duplicar nada.
+
+O login sai do próprio `.env`: `SEED_ADMIN_EMAIL` (padrão `admin@etec01.com.br`) e
+`SEED_ADMIN_PASSWORD` (padrão `Admin@123`). Como o seed roda a cada subida, trocar a senha
+no `.env` e subir de novo já reescreve a senha do administrador. Se você apagar o
+`SEED_ADMIN_PASSWORD`, o seed gera uma aleatória e imprime ela no terminal uma vez só.
+
+O que o PostgreSQL precisa é estar instalado e rodando — o banco em si o script cria.
 
 - API: `http://localhost:2077`
 - Swagger: `http://localhost:2077/docs`
@@ -96,7 +99,9 @@ aparece uma vez só. Pra escolher a senha você mesmo, defina `SEED_ADMIN_PASSWO
 
 | Comando | O que faz |
 | :--- | :--- |
-| `npm run dev` | Sobe recarregando a cada alteração |
+| `npm run dev` | Prepara o banco e sobe a API recarregando a cada alteração |
+| `npm run dev:only` | Sobe só a API, pulando a preparação do banco |
+| `npm run db:setup` | Só a preparação do banco: cria, migra e popula |
 | `npm run build` | Compila pra `dist/` |
 | `npm start` | Roda a versão compilada |
 | `npm run typecheck` | Confere os tipos sem gerar arquivo |
