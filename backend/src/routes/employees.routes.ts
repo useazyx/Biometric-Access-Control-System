@@ -18,6 +18,7 @@ import {
   ERROR_RESPONSE,
   PAGINATION_RESPONSE,
   PAGINATION_SCHEMA,
+  SEARCH_SCHEMA,
 } from "./schemas/shared"
 import { CreateEmployeeController } from "../controllers/employees/CreateEmployeeController"
 import { ListEmployeesController } from "../controllers/employees/ListEmployeesController"
@@ -60,6 +61,7 @@ const LIST_EMPLOYEES_SCHEMA = {
   description: "Lista funcionários por unidade",
   querystring: z.object({
     unit_code: z.string(),
+    search: SEARCH_SCHEMA,
     ...PAGINATION_SCHEMA,
   }),
   response: {

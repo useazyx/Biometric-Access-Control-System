@@ -12,7 +12,7 @@
 
 import type { FastifyInstance } from "fastify"
 import z from "zod"
-import { CPF_SCHEMA, ERROR_RESPONSE, PAGINATION_RESPONSE, PAGINATION_SCHEMA } from "./schemas/shared"
+import { CPF_SCHEMA, ERROR_RESPONSE, PAGINATION_RESPONSE, PAGINATION_SCHEMA, SEARCH_SCHEMA } from "./schemas/shared"
 import { CreateVisitorController } from "../controllers/visitors/CreateVisitorController"
 import { ListVisitorsController } from "../controllers/visitors/ListVisitorsController"
 import { UpdateVisitorController } from "../controllers/visitors/UpdateVisitorController"
@@ -50,6 +50,7 @@ const LIST_VISITORS_SCHEMA = {
   description: "Lista visitantes por unidade",
   querystring: z.object({
     unit_code: z.string(),
+    search: SEARCH_SCHEMA,
     ...PAGINATION_SCHEMA,
   }),
   response: {

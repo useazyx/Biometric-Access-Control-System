@@ -3,9 +3,11 @@
  */
 
 import { prisma } from "../../config/prisma"
+import { personSearchFilter } from "../../lib/personSearch"
 
 interface ListTeachersRequest {
   unit_code: string
+  search?: string
   page: number
   page_size: number
 }
@@ -27,13 +29,13 @@ interface ListTeachersResult {
 
 export class ListTeachersService {
   async execute(params: ListTeachersRequest): Promise<ListTeachersResult> {
-    const { unit_code, page, page_size } = params
+    const { unit_code, search, page, page_size } = params
 
     const unit = await this.validateUnit(unit_code)
 
     const [teachers, total] = await Promise.all([
-      this.fetchTeachers(unit.id, page, page_size),
-      this.getTotalCount(unit.id),
+      this.fetchTeachers(unit.id, page, page_size, search),
+      this.getTotalCount(unit.id, search),
     ])
 
     const total_pages = Math.ceil(total / page_size)
@@ -55,7 +57,7 @@ export class ListTeachersService {
     return unit
   }
 
-  private async fetchTeachers(unitId: number, page: number, pageSize: number) {
+  private async fetchTeachers(unitId: number, page: number, pageSize: number, search?: string) {
     const skip = (page - 1) * pageSize
 
     const teachers = await prisma.teacher.findMany({
@@ -63,6 +65,7 @@ export class ListTeachersService {
         employee: {
           person: {
             registration_unit_id: unitId,
+            ...personSearchFilter(search),
           },
         },
       },
@@ -97,12 +100,13 @@ export class ListTeachersService {
       }))
   }
 
-  private async getTotalCount(unitId: number) {
+  private async getTotalCount(unitId: number, search?: string) {
     return prisma.teacher.count({
       where: {
         employee: {
           person: {
             registration_unit_id: unitId,
+            ...personSearchFilter(search),
           },
         },
       },

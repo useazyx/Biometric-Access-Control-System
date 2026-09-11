@@ -18,6 +18,7 @@ import {
   PAGINATION_RESPONSE,
   PAGINATION_SCHEMA,
   PERIODS,
+  SEARCH_SCHEMA,
   STUDENT_STATUSES,
 } from "./schemas/shared"
 import { CreateStudentController } from "../controllers/students/CreateStudentController"
@@ -68,6 +69,7 @@ const LIST_STUDENTS_SCHEMA = {
   description: "Lista alunos por unidade",
   querystring: z.object({
     unit_code: z.string(),
+    search: SEARCH_SCHEMA,
     ...PAGINATION_SCHEMA,
   }),
   response: {

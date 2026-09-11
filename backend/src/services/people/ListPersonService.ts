@@ -14,12 +14,14 @@
  */
 
 import { prisma } from "../../config/prisma"
+import { personSearchFilter } from "../../lib/personSearch"
 import type { PersonType } from "@prisma/client"
 
 // O que a gente precisa pra fazer a busca:
 interface ListPersonRequest {
   unit_code: string
   type?: PersonType
+  search?: string
   page: number
   page_size: number
 }
@@ -47,12 +49,12 @@ interface ListResult {
 
 export class ListPersonService {
   async execute(params: ListPersonRequest): Promise<ListResult> {
-    const { unit_code, type, page, page_size } = params
+    const { unit_code, type, search, page, page_size } = params
 
     // Valida a unidade (pra saber se existe mesmo)
     const unit = await this.validateUnit(unit_code)
     // Monta as regras da busca (onde e o quê)
-    const where = this.buildWhereClause(unit.id, type)
+    const where = this.buildWhereClause(unit.id, type, search)
 
     // Busca em paralelo: a lista de pessoas e o total (pra ser mais rápido)
     const [people, total] = await Promise.all([this.fetchPeople(where, page, page_size), this.getTotalCount(where)])
@@ -84,12 +86,14 @@ export class ListPersonService {
 
   // Monta as regras da busca: unidade obrigatória e tipo opcional
 
-  private buildWhereClause(unitId: number, type?: PersonType) {
+  private buildWhereClause(unitId: number, type?: PersonType, search?: string) {
     // Filtro fixo: só pessoas da unidade X
     // Filtro extra: se escolheu um tipo específico (estudante, funcionário, etc)
+    // E, por cima, a busca por nome, e-mail ou CPF, quando a pessoa digitou algo
     return {
       registration_unit_id: unitId,
       ...(type && { type }),
+      ...personSearchFilter(search),
     }
   }
 

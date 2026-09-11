@@ -112,6 +112,15 @@ export const PAGINATION_SCHEMA = {
   page_size: PAGE_SIZE_SCHEMA,
 }
 
+// Busca textual das listagens. Vem vazia quando a pessoa limpa o campo, e nesse caso
+// a gente trata como "sem busca" em vez de procurar por string vazia.
+export const SEARCH_SCHEMA = z
+  .string()
+  .trim()
+  .max(100, { message: "Busca muito longa (max 100)" })
+  .optional()
+  .transform((value) => (value ? value : undefined))
+
 // Como toda resposta de listagem paginada termina (pro front saber onde está)
 export const PAGINATION_RESPONSE = {
   total: z.number(),

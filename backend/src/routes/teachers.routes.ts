@@ -12,7 +12,7 @@
 
 import type { FastifyInstance } from "fastify"
 import z from "zod"
-import { CPF_SCHEMA, ERROR_RESPONSE, PAGINATION_RESPONSE, PAGINATION_SCHEMA } from "./schemas/shared"
+import { CPF_SCHEMA, ERROR_RESPONSE, PAGINATION_RESPONSE, PAGINATION_SCHEMA, SEARCH_SCHEMA } from "./schemas/shared"
 import { CreateTeacherController } from "../controllers/teachers/CreateTeacherController"
 import { ListTeachersController } from "../controllers/teachers/ListTeachersController"
 import { UpdateTeacherController } from "../controllers/teachers/UpdateTeacherController"
@@ -45,6 +45,7 @@ const LIST_TEACHERS_SCHEMA = {
   description: "Lista professores por unidade",
   querystring: z.object({
     unit_code: z.string(),
+    search: SEARCH_SCHEMA,
     ...PAGINATION_SCHEMA,
   }),
   response: {

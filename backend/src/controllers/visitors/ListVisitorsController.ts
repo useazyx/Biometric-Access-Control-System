@@ -10,11 +10,14 @@ export class ListVisitorsController {
     try {
       const query = request.query as {
         unit_code: string
+        search?: string
         page?: string
         page_size?: string
       }
 
       const unit_code = query?.unit_code
+      // Vem vazio quando a pessoa limpa o campo: nesse caso é "sem busca"
+      const search = query?.search?.trim() || undefined
       const page = Number.parseInt(query?.page || "1")
       const page_size = Number.parseInt(query?.page_size || "20")
 
@@ -28,6 +31,7 @@ export class ListVisitorsController {
       const service = new ListVisitorsService()
       const result = await service.execute({
         unit_code,
+        search,
         page,
         page_size,
       })

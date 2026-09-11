@@ -3,9 +3,11 @@
  */
 
 import { prisma } from "../../config/prisma"
+import { personSearchFilter } from "../../lib/personSearch"
 
 interface ListStudentsRequest {
   unit_code: string
+  search?: string
   page: number
   page_size: number
 }
@@ -35,13 +37,13 @@ interface ListStudentsResult {
 
 export class ListStudentsService {
   async execute(params: ListStudentsRequest): Promise<ListStudentsResult> {
-    const { unit_code, page, page_size } = params
+    const { unit_code, search, page, page_size } = params
 
     const unit = await this.validateUnit(unit_code)
 
     const [students, total] = await Promise.all([
-      this.fetchStudents(unit.id, page, page_size),
-      this.getTotalCount(unit.id),
+      this.fetchStudents(unit.id, page, page_size, search),
+      this.getTotalCount(unit.id, search),
     ])
 
     const total_pages = Math.ceil(total / page_size)
@@ -63,13 +65,14 @@ export class ListStudentsService {
     return unit
   }
 
-  private async fetchStudents(unitId: number, page: number, pageSize: number) {
+  private async fetchStudents(unitId: number, page: number, pageSize: number, search?: string) {
     const skip = (page - 1) * pageSize
 
     const students = await prisma.student.findMany({
       where: {
         person: {
           registration_unit_id: unitId,
+          ...personSearchFilter(search),
         },
       },
       skip,
@@ -109,11 +112,12 @@ export class ListStudentsService {
     }))
   }
 
-  private async getTotalCount(unitId: number) {
+  private async getTotalCount(unitId: number, search?: string) {
     return prisma.student.count({
       where: {
         person: {
           registration_unit_id: unitId,
+          ...personSearchFilter(search),
         },
       },
     })

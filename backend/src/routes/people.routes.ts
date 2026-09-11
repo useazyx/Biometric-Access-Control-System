@@ -24,6 +24,7 @@ import {
   PAGINATION_SCHEMA,
   PERSON_TYPES,
   PHONE_SCHEMA,
+  SEARCH_SCHEMA,
   UNIT_CODE_SCHEMA,
   UNIT_TYPES,
 } from "./schemas/shared"
@@ -75,6 +76,7 @@ const LIST_PERSON_SCHEMA = {
   querystring: z.object({
     unit_code: z.string(),
     type: z.enum(PERSON_TYPES).optional(),
+    search: SEARCH_SCHEMA,
     ...PAGINATION_SCHEMA,
   }),
   response: {

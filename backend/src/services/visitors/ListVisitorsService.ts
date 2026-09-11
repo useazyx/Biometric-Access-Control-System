@@ -3,9 +3,11 @@
  */
 
 import { prisma } from "../../config/prisma"
+import { personSearchFilter } from "../../lib/personSearch"
 
 interface ListVisitorsRequest {
   unit_code: string
+  search?: string
   page: number
   page_size: number
 }
@@ -41,13 +43,13 @@ interface ListVisitorsResult {
 
 export class ListVisitorsService {
   async execute(params: ListVisitorsRequest): Promise<ListVisitorsResult> {
-    const { unit_code, page, page_size } = params
+    const { unit_code, search, page, page_size } = params
 
     const unit = await this.validateUnit(unit_code)
 
     const [visitors, total] = await Promise.all([
-      this.fetchVisitors(unit.id, page, page_size),
-      this.getTotalCount(unit.id),
+      this.fetchVisitors(unit.id, page, page_size, search),
+      this.getTotalCount(unit.id, search),
     ])
 
     const total_pages = Math.ceil(total / page_size)
@@ -69,13 +71,14 @@ export class ListVisitorsService {
     return unit
   }
 
-  private async fetchVisitors(unitId: number, page: number, pageSize: number) {
+  private async fetchVisitors(unitId: number, page: number, pageSize: number, search?: string) {
     const skip = (page - 1) * pageSize
 
     const visitors = await prisma.visitor.findMany({
       where: {
         person: {
           registration_unit_id: unitId,
+          ...personSearchFilter(search),
         },
       },
       skip,
@@ -131,11 +134,12 @@ export class ListVisitorsService {
     }))
   }
 
-  private async getTotalCount(unitId: number) {
+  private async getTotalCount(unitId: number, search?: string) {
     return prisma.visitor.count({
       where: {
         person: {
           registration_unit_id: unitId,
+          ...personSearchFilter(search),
         },
       },
     })
