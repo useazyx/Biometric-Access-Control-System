@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "main": "dist/server.js",
   "scripts": {
-    "dev": "prisma generate && ts-node-dev --respawn --transpile-only src/server.ts",
+    "dev": "npm run db:setup && ts-node-dev --respawn --transpile-only src/server.ts",
+    "dev:only": "prisma generate && ts-node-dev --respawn --transpile-only src/server.ts",
+    "db:setup": "prisma generate && ts-node --transpile-only scripts/setup-db.ts",
     "build": "prisma generate && tsc",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",

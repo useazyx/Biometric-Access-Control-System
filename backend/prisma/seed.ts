@@ -23,10 +23,12 @@ const prisma = new PrismaClient()
 
 // A senha do admin vem do .env pra não ficar chumbada aqui dentro.
 // Se não configurar, o seed gera uma aleatória e imprime ela uma única vez no final.
-const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL || "admin@etec001.com.br"
-const ADMIN_CPF = "44504487829"
+const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL || "admin@etec01.com.br"
+// CPF no mesmo formato que o sistema grava pelas telas de cadastro, pra não nascer duplicado
+const ADMIN_CPF = "445.044.878-29"
 const ADMIN_REGISTRATION = "ADM001"
 const UNIT_CODE = "ETE001"
+const EXAMPLE_STUDENT_RM = "23130"
 const BCRYPT_ROUNDS = 12
 
 // Os cargos do sistema, do mais pro menos poderoso
@@ -81,7 +83,14 @@ async function seedAdmin(unitId: number, roleId: number, password: string) {
 
   const person = await prisma.person.upsert({
     where: { cpf: ADMIN_CPF },
-    update: { system_access_hash: passwordHash, registration_unit_id: unitId },
+    update: {
+      email: ADMIN_EMAIL,
+      system_access_hash: passwordHash,
+      temporary_password: null,
+      // Marca a senha como já definida, senão o sistema pede troca logo no primeiro login
+      password_reset_at: new Date(),
+      registration_unit_id: unitId,
+    },
     create: {
       full_name: "Administrador do Sistema",
       birth_date: new Date("1990-01-01"),
@@ -91,6 +100,7 @@ async function seedAdmin(unitId: number, roleId: number, password: string) {
       type: PersonType.employee,
       main_unit_type: UnitType.Etec,
       system_access_hash: passwordHash,
+      password_reset_at: new Date(),
       registration_unit_id: unitId,
     },
   })
@@ -113,13 +123,21 @@ async function seedAdmin(unitId: number, roleId: number, password: string) {
 
 // Cria um aluno de exemplo, pra listagem de alunos não abrir vazia
 async function seedExampleStudent(unitId: number) {
+  // Num banco que já foi usado, esse RM pode estar com outra pessoa.
+  // Nesse caso o exemplo não faz falta nenhuma: pula e segue o baile.
+  const rmTaken = await prisma.student.findUnique({ where: { rm: EXAMPLE_STUDENT_RM } })
+  if (rmTaken) {
+    console.log("🎓 Aluno de exemplo dispensado (o RM já está em uso)")
+    return
+  }
+
   const person = await prisma.person.upsert({
-    where: { cpf: "12345678909" },
+    where: { cpf: "123.456.789-09" },
     update: {},
     create: {
       full_name: "Aluno de Exemplo",
       birth_date: new Date("2006-05-20"),
-      cpf: "12345678909",
+      cpf: "123.456.789-09",
       email: "aluno.exemplo@etec001.com.br",
       phone: "(11) 98888-7777",
       type: PersonType.student,
@@ -132,7 +150,7 @@ async function seedExampleStudent(unitId: number) {
     where: { person_id: person.id },
     update: {},
     create: {
-      rm: "23130",
+      rm: EXAMPLE_STUDENT_RM,
       period: Period.morning,
       course: "Desenvolvimento de Sistemas",
       class: "3 DS",
@@ -221,9 +239,16 @@ async function main() {
   const unit = await seedUnit()
   const adminRole = await seedRoles()
   const admin = await seedAdmin(unit.id, adminRole.id, password)
-  await seedExampleStudent(unit.id)
-  await seedExampleBiometric(unit.id, admin.id)
-  await seedExampleLogs(unit.id, admin.id)
+
+  // O que importa pra entrar no sistema já está pronto acima. Daqui pra baixo é só
+  // enfeite de dashboard, então um tropeço aqui não pode derrubar o seed inteiro.
+  try {
+    await seedExampleStudent(unit.id)
+    await seedExampleBiometric(unit.id, admin.id)
+    await seedExampleLogs(unit.id, admin.id)
+  } catch (error) {
+    console.log("⚠️  Não deu pra criar os dados de exemplo (o banco já tem registros parecidos)")
+  }
 
   console.log("\n✅ Banco populado com sucesso!")
   console.log("\n📌 Pra entrar no sistema:")
