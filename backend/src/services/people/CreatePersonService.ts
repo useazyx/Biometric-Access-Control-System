@@ -67,19 +67,37 @@ export class CreatePersonService {
       })
     })
 
-    // O e-mail sai fora da transação de propósito: se o Gmail estiver fora do ar,
-    // a pessoa continua cadastrada e a gente só perde o aviso
+    // O e-mail sai fora da transação de propósito: se o provedor estiver fora do ar,
+    // a pessoa continua cadastrada e a gente só perde o aviso.
+    // O try/catch aqui é o que faz essa intenção valer: sem ele, uma falha no envio
+    // derrubava a requisição inteira com 500 DEPOIS da pessoa já estar salva no banco,
+    // e a tela mostrava erro pra um cadastro que tinha dado certo.
+    let temporaryPasswordSent = false
+
     if (person.temporary_password) {
-      await this.sendWelcomeEmail(person.full_name, person.email, person.temporary_password)
+      try {
+        await this.sendWelcomeEmail(person.full_name, person.email, person.temporary_password)
+        temporaryPasswordSent = true
+      } catch (error) {
+        console.error(
+          `[CreatePerson] Pessoa ${person.id} cadastrada, mas o e-mail com a senha temporária não saiu:`,
+          error,
+        )
+      }
     }
 
     return {
       id: person.id,
-      message: "Pessoa cadastrada com sucesso",
+      message: temporaryPasswordSent
+        ? "Pessoa cadastrada com sucesso"
+        : person.temporary_password
+          ? "Pessoa cadastrada, mas o e-mail com a senha temporária não pôde ser enviado"
+          : "Pessoa cadastrada com sucesso",
       created_at: new Date().toISOString(),
       email: person.email,
       full_name: person.full_name,
-      temporary_password_sent: !!person.temporary_password,
+      // Diz a verdade: só é true se o e-mail realmente saiu
+      temporary_password_sent: temporaryPasswordSent,
     }
   }
 

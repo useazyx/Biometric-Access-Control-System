@@ -37,15 +37,16 @@ export class CreateBiometricController {
       const biometric = await service.execute(cpf, template, finger, unit_code);
 
       // Se deu tudo certo, monta a resposta bonitinha pro front
+      // Os campos vão SOLTOS, não aninhados num "biometric": é assim que o schema
+      // da rota declara a resposta. Aninhado, o Fastify falhava ao serializar e
+      // devolvia 500 mesmo com a digital já gravada no banco.
       return reply.status(201).send({
         id: biometric.id,
         message: "Digital cadastrada com sucesso! 👌",
-        biometric: {
-          id: biometric.id,
-          person_id: biometric.person_id,
-          finger: biometric.finger,
-          created_at: biometric.created_at,
-        },
+        person_id: biometric.person_id,
+        finger: biometric.finger,
+        // O schema declara datetime como TEXTO: mandar o Date cru quebra a serialização
+        created_at: biometric.created_at.toISOString(),
       });
     } catch (error: any) {
       // Se deu erro, vê qual foi e manda a resposta adequada
