@@ -1,298 +1,242 @@
 /**
- * Dashboard.tsx - A tela inicial com os números da unidade
+ * Dashboard.tsx - A tela de abertura: o tamanho do cadastro e o movimento recente
  * # Pra que serve?
- * - Mostrar os totais do sistema (pessoas, alunos, funcionários, unidades, visitantes)
- * - Comparar a distribuição de pessoas por perfil e de unidades por tipo
+ * - Responder de bate-pronto quanta gente existe e quem passou pela catraca hoje
+ * - Servir de atalho pras listagens, sem precisar caçar na navegação
  * Feito por: Arthur Roberto Weege Pontes
  * Versão: 2.0.0
- * Data: 2026-09-09
+ * Data: 2026-09-10
  * Alterações:
- * - v1.0.0 (2025-08-18): Cartões de total e dois gráficos de barra
- * - v2.0.0 (2026-09-09): Os gráficos estavam ilegíveis: as seis barras usavam tokens de
- *                        superfície (--accent, --secondary, --muted), que são quase o mesmo
- *                        cinza claro, e duas categorias repetiam a mesma cor. Além disso as
- *                        seis barras ficavam num único grupo com o eixo X escondido, sem
- *                        nome nenhum. Agora é barra horizontal, uma cor só (o comprimento
- *                        já mostra a magnitude), ordenada da maior pra menor e com o nome
- *                        e o valor de cada categoria escritos. O total de visitantes, que
- *                        a API já mandava e ninguém mostrava, também entrou.
+ * - v1.0.0 (2025-08-15): Primeira versão do painel
+ * - v2.0.0 (2026-09-10): Reescrito. Os cartões viraram atalho pras listagens e
+ *                        entrou a distribuição por perfil, que era a pergunta que o
+ *                        painel antigo não respondia.
  */
 
-import { useCallback, useEffect, useState } from "react"
-import { Bar, BarChart, CartesianGrid, Cell, LabelList, XAxis, YAxis } from "recharts"
+import { useQuery } from "@tanstack/react-query"
 import {
-  Briefcase,
   Building2,
+  Fingerprint,
   GraduationCap,
-  RefreshCw,
-  UserPlus,
+  UserCog,
   Users,
+  UserSquare2,
 } from "lucide-react"
-import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
-import { StatCard } from "@/components/dashboard/StatCard"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Skeleton } from "@/components/ui/skeleton"
-import { api } from "@/services/api"
-import { useAuth } from "@/contexts/AuthContext"
-
-// De quanto em quanto tempo a tela busca os números de novo
-const REFRESH_INTERVAL_MS = 30_000
-
-// Nome que a pessoa lê pra cada tipo do banco
-const PERSON_TYPE_LABELS: Record<string, string> = {
-  student: "Alunos",
-  teacher: "Professores",
-  employee: "Funcionários",
-  coordinator: "Coordenadores",
-  inspector: "Inspetores",
-  visitor: "Visitantes",
-}
-
-const UNIT_TYPE_LABELS: Record<string, string> = {
-  etec: "Etec",
-  fatec: "Fatec",
-  etec_extension: "Etec (extensão)",
-  fatec_extension: "Fatec (extensão)",
-}
-
-interface Statistics {
-  totalPeople: number
-  totalStudents: number
-  totalEmployees: number
-  totalUnits: number
-  totalVisitors?: number
-}
-
-// Uma barra do gráfico: o nome que aparece e quanto ela vale
-interface ChartRow {
-  label: string
-  value: number
-}
-
-const EMPTY_STATS: Statistics = {
-  totalPeople: 0,
-  totalStudents: 0,
-  totalEmployees: 0,
-  totalUnits: 0,
-  totalVisitors: 0,
-}
+import { api } from "@/lib/api"
+import { useUnitCode } from "@/contexts/AuthContext"
+import { formatDateTime, formatNumber } from "@/lib/format"
+import { EVENT_TYPE_LABELS, EVENT_TYPE_TONES, labelOf, PERSON_TYPE_LABELS } from "@/lib/labels"
+import { PageHeader, Panel, PersonCell, StatTile, StatusBadge } from "@/components/data/Primitives"
+import { Column, DataTable } from "@/components/data/DataTable"
+import type {
+  BiometricLogRow,
+  DashboardStatistics,
+  PeopleBreakdown,
+  PersonType,
+  UnitBreakdown,
+} from "@/types/api"
 
 export default function Dashboard() {
-  const [stats, setStats] = useState<Statistics>(EMPTY_STATS)
-  const [peopleRows, setPeopleRows] = useState<ChartRow[]>([])
-  const [unitRows, setUnitRows] = useState<ChartRow[]>([])
-  const [loading, setLoading] = useState(true)
-  const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
-  const { user } = useAuth()
+  const unitCode = useUnitCode()
 
-  // Transforma o objeto que a API manda ({student: 3, teacher: 1}) na lista de
-  // barras, já ordenada da maior pra menor: comparação fica muito mais fácil.
-  const toSortedRows = (breakdown: Record<string, number>, labels: Record<string, string>): ChartRow[] =>
-    Object.entries(breakdown)
-      .map(([key, value]) => ({ label: labels[key] ?? key, value: Number(value) || 0 }))
-      .sort((a, b) => b.value - a.value)
+  const statistics = useQuery({
+    queryKey: ["dashboard", "statistics"],
+    queryFn: async () => {
+      const { data } = await api.get<{ statistics: DashboardStatistics }>("/dashboard/statistics")
+      return data.statistics
+    },
+  })
 
-  const loadDashboard = useCallback(async () => {
-    try {
-      // As três chamadas são independentes, então vão juntas
-      const [statisticsRes, peopleRes, unitRes] = await Promise.all([
-        api.get("/dashboard/statistics"),
-        api.get("/dashboard/people-breakdown"),
-        api.get("/dashboard/unit-breakdown"),
-      ])
+  const people = useQuery({
+    queryKey: ["dashboard", "people-breakdown"],
+    queryFn: async () => {
+      const { data } = await api.get<{ breakdown: PeopleBreakdown }>("/dashboard/people-breakdown")
+      return data.breakdown
+    },
+  })
 
-      setStats({ ...EMPTY_STATS, ...(statisticsRes.data?.statistics ?? {}) })
-      setPeopleRows(toSortedRows(peopleRes.data?.breakdown ?? {}, PERSON_TYPE_LABELS))
-      setUnitRows(toSortedRows(unitRes.data?.breakdown ?? {}, UNIT_TYPE_LABELS))
-      setLastUpdate(new Date())
-    } catch (error) {
-      // O interceptor do axios já mostrou o toast; aqui só registra pra debug
-      console.error("Não deu pra carregar o dashboard:", error)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const units = useQuery({
+    queryKey: ["dashboard", "unit-breakdown"],
+    queryFn: async () => {
+      const { data } = await api.get<{ breakdown: UnitBreakdown }>("/dashboard/unit-breakdown")
+      return data.breakdown
+    },
+  })
 
-  useEffect(() => {
-    loadDashboard()
+  // As últimas passagens pela catraca: é o dado "vivo" do sistema
+  const recentAccess = useQuery({
+    queryKey: ["dashboard", "recent-access"],
+    queryFn: async () => {
+      const { data } = await api.get<{ logs: BiometricLogRow[] }>("/biometric-access-logs", {
+        params: { page: 1, page_size: 8 },
+      })
+      return data.logs ?? []
+    },
+  })
 
-    // Atualiza sozinho enquanto a tela estiver aberta
-    const timer = setInterval(loadDashboard, REFRESH_INTERVAL_MS)
-    return () => clearInterval(timer)
-  }, [loadDashboard])
+  const stats = statistics.data
 
   return (
-    <div className="space-y-6">
-      {/* ---------------- Cabeçalho da página ---------------- */}
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div className="space-y-1">
-          <h1 className="heading-xl">Dashboard</h1>
-          <p className="section-description">
-            Visão geral
-            {user?.unit_name ? (
-              <>
-                {" da unidade "}
-                <span className="font-medium text-foreground">{user.unit_name}</span>
-              </>
-            ) : (
-              " do sistema de controle de acesso"
-            )}
-          </p>
-        </div>
+    <>
+      <PageHeader
+        title="Painel"
+        description={
+          unitCode
+            ? "Números do cadastro e as últimas passagens registradas."
+            : "Sua conta não está vinculada a uma unidade, então algumas listagens ficam vazias."
+        }
+      />
 
-        <div className="flex items-center gap-3">
-          {lastUpdate && (
-            <span className="text-xs text-muted-foreground">
-              Atualizado às{" "}
-              {lastUpdate.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
-            </span>
-          )}
-          <Button variant="outline" size="sm" onClick={loadDashboard} disabled={loading}>
-            <RefreshCw className={`mr-2 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-            Atualizar
-          </Button>
-        </div>
-      </div>
-
-      {/* ---------------- Os totais ----------------
-       * Número único não vira gráfico de uma barra: vira cartão.
-       * Cada um leva pra tela onde a pessoa consegue mexer naquilo.
-       */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        <StatCard
-          title="Pessoas"
-          value={stats.totalPeople}
-          icon={Users}
-          loading={loading}
-          hint="Todos os perfis"
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        <StatTile
+          label="Pessoas"
+          value={stats?.totalPeople}
+          icon={<Users className="h-4 w-4" aria-hidden />}
           to="/people"
         />
-        <StatCard title="Alunos" value={stats.totalStudents} icon={GraduationCap} loading={loading} to="/students" />
-        <StatCard
-          title="Funcionários"
-          value={stats.totalEmployees}
-          icon={Briefcase}
-          loading={loading}
+        <StatTile
+          label="Alunos"
+          value={stats?.totalStudents}
+          icon={<GraduationCap className="h-4 w-4" aria-hidden />}
+          to="/students"
+        />
+        <StatTile
+          label="Funcionários"
+          value={stats?.totalEmployees}
+          icon={<UserCog className="h-4 w-4" aria-hidden />}
           to="/employees"
         />
-        <StatCard title="Visitantes" value={stats.totalVisitors ?? 0} icon={UserPlus} loading={loading} to="/visitors" />
-        <StatCard title="Unidades" value={stats.totalUnits} icon={Building2} loading={loading} to="/units" />
+        <StatTile
+          label="Visitantes"
+          value={stats?.totalVisitors}
+          icon={<UserSquare2 className="h-4 w-4" aria-hidden />}
+          to="/visitors"
+        />
+        <StatTile
+          label="Unidades"
+          value={stats?.totalUnits}
+          icon={<Building2 className="h-4 w-4" aria-hidden />}
+          to="/units"
+          hint={
+            units.data
+              ? `${units.data.etec} Etec · ${units.data.fatec} Fatec`
+              : undefined
+          }
+        />
       </div>
 
-      {/* ---------------- Os dois gráficos ---------------- */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <BreakdownChart
-          title="Pessoas por perfil"
-          description="Quantas pessoas de cada tipo estão cadastradas"
-          rows={peopleRows}
-          loading={loading}
-        />
-        <BreakdownChart
-          title="Unidades por tipo"
-          description="Distribuição entre Etecs, Fatecs e suas extensões"
-          rows={unitRows}
-          loading={loading}
-        />
+      <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_20rem]">
+        <div>
+          <h3 className="mb-2 text-sm font-semibold">Últimas passagens pela catraca</h3>
+          <DataTable<BiometricLogRow>
+            rows={recentAccess.data ?? []}
+            rowKey={(row) => row.id}
+            isLoading={recentAccess.isLoading}
+            isError={recentAccess.isError}
+            error={recentAccess.error}
+            onRetry={() => recentAccess.refetch()}
+            emptyTitle="Nenhuma passagem registrada"
+            emptyDescription="Assim que alguém encostar o dedo no sensor, a passagem aparece aqui."
+            columns={RECENT_COLUMNS}
+          />
+        </div>
+
+        <Panel title="Pessoas por perfil" description="Considerando todas as unidades.">
+          {people.isLoading ? (
+            <div className="space-y-2.5">
+              {Array.from({ length: 6 }).map((_, index) => (
+                <div key={index} className="h-6 animate-pulse rounded bg-muted" />
+              ))}
+            </div>
+          ) : (
+            <PeopleBreakdownList breakdown={people.data} />
+          )}
+        </Panel>
       </div>
-    </div>
+    </>
   )
 }
 
-/**
- * Gráfico de barras horizontais para comparar categorias.
- *
- * Escolhas de leitura:
- * - Barra HORIZONTAL porque os nomes são longos ("Coordenadores", "Fatec (extensão)")
- *   e na vertical eles ficariam inclinados ou cortados.
- * - UMA cor só: o que a pessoa compara aqui é tamanho, não identidade. Pintar cada
- *   barra de uma cor sugere que a cor significa algo, e não significa.
- * - Valor escrito na ponta de cada barra, então não precisa de eixo numérico nem
- *   de ficar medindo a barra contra a linha de grade.
- */
-function BreakdownChart({
-  title,
-  description,
-  rows,
-  loading,
-}: {
-  title: string
-  description: string
-  rows: ChartRow[]
-  loading: boolean
-}) {
-  // Nada cadastrado ainda: lista vazia não é erro, então diz isso com palavras
-  const isEmpty = !loading && rows.every((row) => row.value === 0)
+const RECENT_COLUMNS: Column<BiometricLogRow>[] = [
+  {
+    key: "person",
+    header: "Pessoa",
+    cell: (row) => <PersonCell name={row.person?.full_name} cpf={row.person?.cpf} />,
+  },
+  {
+    key: "event",
+    header: "Evento",
+    cell: (row) => (
+      <StatusBadge tone={EVENT_TYPE_TONES[row.event_type] ?? "neutral"}>
+        {labelOf(EVENT_TYPE_LABELS, row.event_type)}
+      </StatusBadge>
+    ),
+  },
+  {
+    key: "authorized",
+    header: "Resultado",
+    cell: (row) => (
+      <StatusBadge tone={row.is_authorized ? "authorized" : "denied"}>
+        {row.is_authorized ? "Autorizado" : "Negado"}
+      </StatusBadge>
+    ),
+  },
+  {
+    key: "unit",
+    header: "Unidade",
+    hideBelow: "lg",
+    cell: (row) => <span className="identifier">{row.unit?.unit_code ?? "—"}</span>,
+  },
+  {
+    key: "time",
+    header: "Quando",
+    align: "right",
+    cell: (row) => (
+      <span className="numeric whitespace-nowrap text-muted-foreground">
+        {formatDateTime(row.access_time)}
+      </span>
+    ),
+  },
+]
 
-  // Espaço extra à direita pro número da ponta não encostar na borda
-  const maxValue = Math.max(...rows.map((row) => row.value), 1)
+/** Barra proporcional por perfil: o número sozinho não mostra o peso relativo. */
+function PeopleBreakdownList({ breakdown }: { breakdown?: PeopleBreakdown }) {
+  if (!breakdown) {
+    return <p className="text-[0.8125rem] text-muted-foreground">Não consegui carregar.</p>
+  }
+
+  const entries = Object.entries(breakdown) as [PersonType, number][]
+  const total = entries.reduce((sum, [, value]) => sum + value, 0)
+
+  if (!total) {
+    return <p className="text-[0.8125rem] text-muted-foreground">Nenhuma pessoa cadastrada.</p>
+  }
 
   return (
-    <Card className="shadow-card">
-      <CardHeader>
-        <CardTitle className="text-base">{title}</CardTitle>
-        <CardDescription>{description}</CardDescription>
-      </CardHeader>
+    <ul className="space-y-2.5">
+      {entries
+        .sort(([, a], [, b]) => b - a)
+        .map(([type, value]) => {
+          const percentage = Math.round((value / total) * 100)
 
-      <CardContent>
-        {loading ? (
-          <div className="space-y-3 py-2">
-            {Array.from({ length: 5 }).map((_, index) => (
-              <Skeleton key={index} className="h-7 w-full" />
-            ))}
-          </div>
-        ) : isEmpty ? (
-          <div className="empty-state">
-            <p className="text-sm font-medium">Nada cadastrado ainda</p>
-            <p className="text-xs text-muted-foreground">
-              Assim que os cadastros começarem, os números aparecem aqui.
-            </p>
-          </div>
-        ) : (
-          <ChartContainer
-            config={{ value: { label: "Quantidade", color: "hsl(var(--primary))" } }}
-            className="h-[260px] w-full"
-          >
-            <BarChart
-              data={rows}
-              layout="vertical"
-              margin={{ top: 4, right: 40, bottom: 4, left: 8 }}
-              barCategoryGap="28%"
-            >
-              {/* Grade só na horizontal do valor, discreta: serve de apoio, não de assunto */}
-              <CartesianGrid horizontal={false} strokeDasharray="0" className="stroke-border/60" />
-
-              <XAxis type="number" domain={[0, maxValue]} hide />
-              <YAxis
-                type="category"
-                dataKey="label"
-                width={116}
-                tickLine={false}
-                axisLine={false}
-                tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }}
-              />
-
-              <ChartTooltip cursor={false} content={<ChartTooltipContent hideLabel={false} />} />
-
-              {/* maxBarSize limita a espessura: barra gorda demais come o ar entre as linhas */}
-              <Bar dataKey="value" radius={[0, 4, 4, 0]} maxBarSize={22} fill="hsl(var(--primary))">
-                {/* Categoria sem ninguém fica bem apagada, pra não competir com quem tem gente */}
-                {rows.map((row) => (
-                  <Cell key={row.label} opacity={row.value === 0 ? 0.25 : 1} />
-                ))}
-
-                <LabelList
-                  dataKey="value"
-                  position="right"
-                  offset={8}
-                  className="fill-foreground"
-                  style={{ fontSize: 12, fontWeight: 500 }}
-                />
-              </Bar>
-            </BarChart>
-          </ChartContainer>
-        )}
-      </CardContent>
-    </Card>
+          return (
+            <li key={type}>
+              <div className="flex items-baseline justify-between gap-2 text-[0.8125rem]">
+                <span>{labelOf(PERSON_TYPE_LABELS, type)}</span>
+                <span className="numeric text-muted-foreground">
+                  {formatNumber(value)}
+                  <span className="ml-1.5 text-[0.75rem]">{percentage}%</span>
+                </span>
+              </div>
+              <div
+                className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted"
+                role="presentation"
+              >
+                <div className="h-full rounded-full bg-primary" style={{ width: percentage + "%" }} />
+              </div>
+            </li>
+          )
+        })}
+    </ul>
   )
 }

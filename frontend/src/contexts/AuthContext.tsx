@@ -1,217 +1,176 @@
 /**
- * AuthContext.tsx - Guarda quem está logado e cuida de entrar e sair do sistema
+ * AuthContext.tsx - Quem está logado, e o que o resto do sistema sabe sobre isso
  * # Pra que serve?
- * - Manter os dados do usuário logado disponíveis pra toda a aplicação
- * - Fazer login, buscar o perfil completo e fazer logout registrando a saída
- * - Entregar o unit_code do usuário, que quase toda listagem precisa
+ * - Guardar a sessão (token e perfil) e restaurá-la quando a página recarrega
+ * - Entregar o unit_code do usuário, que TODA listagem exige como parâmetro
  * Feito por: Arthur Roberto Weege Pontes
- * Versão: 2.0.0
- * Data: 2026-09-09
+ * Versão: 3.0.0
+ * Data: 2026-09-10
  * Alterações:
  * - v1.0.0 (2025-08-10): Login, logout e persistência no localStorage
- * - v2.0.0 (2026-09-09): Passou a buscar /me depois do login pra saber o unit_code do
- *                        usuário. Antes as telas chumbavam "ETE001" na mão, e por isso
- *                        o sistema só funcionava numa unidade só.
+ * - v2.0.0 (2026-09-09): Passou a buscar /me depois do login pra saber o unit_code
+ * - v3.0.0 (2026-09-10): Reescrito pro painel novo. A sessão salva agora é validada
+ *                        contra o /me antes de liberar a tela, então token vencido não
+ *                        deixa mais o painel abrir vazio e só quebrar na primeira lista.
  */
 
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react"
-import { api } from "@/services/api"
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
+import { api, apiErrorMessage, STORAGE_KEYS } from "@/lib/api"
+import type { LoginResponse, Me, PersonType } from "@/types/api"
 
-// O que a gente sabe sobre quem está logado
-export interface User {
+/** O recorte do perfil que a interface precisa ter sempre à mão. */
+export interface SessionUser {
   id: number
-  email: string
   full_name: string
-  type?: string
-  cpf?: string
-  unit_id?: number
-  // Código da unidade (ex: ETE001). É o filtro que todas as listagens usam.
-  unit_code?: string
-  unit_name?: string
+  email: string
+  cpf: string
+  type: PersonType
+  /** Sai de /me → registration_unit.unit_code. Sem ele, nenhuma listagem funciona. */
+  unit_code: string | null
+  unit_name: string | null
 }
 
-interface AuthContextData {
-  signed: boolean
-  user: User | null
+interface AuthContextValue {
+  user: SessionUser | null
+  /** true enquanto a sessão salva ainda está sendo conferida com a API. */
   loading: boolean
   signIn: (email: string, password: string) => Promise<void>
   signOut: () => Promise<void>
-  // Recarrega o perfil a partir da API (útil depois de editar os próprios dados)
-  refreshUser: () => Promise<void>
+  /** Recarrega o perfil, pra tela de conta refletir uma alteração na hora. */
+  refresh: () => Promise<void>
 }
 
-// As chaves que a gente guarda no localStorage, num lugar só pra não errar o nome
-const STORAGE_KEYS = {
-  token: "access_token",
-  refreshToken: "refresh_token",
-  user: "user",
-  accessLogId: "access_log_id",
-} as const
+const AuthContext = createContext<AuthContextValue | undefined>(undefined)
 
-const AuthContext = createContext<AuthContextData>({} as AuthContextData)
-
-interface AuthProviderProps {
-  children: ReactNode
+/** Transforma a resposta do /me no recorte que a interface usa. */
+function toSessionUser(me: Me): SessionUser {
+  return {
+    id: me.id,
+    full_name: me.full_name,
+    email: me.email,
+    cpf: me.cpf,
+    type: me.type,
+    unit_code: me.registration_unit?.unit_code ?? null,
+    unit_name: me.registration_unit?.name ?? null,
+  }
 }
 
-export function AuthProvider({ children }: AuthProviderProps) {
-  const [user, setUser] = useState<User | null>(null)
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<SessionUser | null>(null)
   const [loading, setLoading] = useState(true)
 
-  // Apaga tudo que identifica a sessão (usado no logout e quando o token é inválido)
+  /** Apaga tudo que identifica a sessão. */
   const clearSession = useCallback(() => {
     Object.values(STORAGE_KEYS).forEach((key) => localStorage.removeItem(key))
     setUser(null)
   }, [])
 
-  // Busca o perfil completo na API. É daqui que vem o unit_code, que o /login não manda.
-  const fetchProfile = useCallback(async (): Promise<User | null> => {
-    try {
-      const { data } = await api.get("/me")
+  /** Busca o perfil completo. É daqui que vem o unit_code, que o /login não manda. */
+  const loadProfile = useCallback(async () => {
+    const { data } = await api.get<Me>("/me")
+    const profile = toSessionUser(data)
 
-      const profile: User = {
-        id: data.id,
-        email: data.email,
-        full_name: data.full_name,
-        type: data.type,
-        cpf: data.cpf,
-        unit_id: data.registration_unit?.id,
-        unit_code: data.registration_unit?.unit_code,
-        unit_name: data.registration_unit?.name,
-      }
+    localStorage.setItem(STORAGE_KEYS.user, JSON.stringify(profile))
+    setUser(profile)
 
-      localStorage.setItem(STORAGE_KEYS.user, JSON.stringify(profile))
-      setUser(profile)
-      return profile
-    } catch (error) {
-      // Token velho ou usuário apagado: o interceptor do axios já manda pro login
-      console.error("Não deu pra carregar o perfil:", error)
-      return null
-    }
+    return profile
   }, [])
 
-  // Quando o app abre, tenta recuperar a sessão que já estava salva
+  // Ao abrir o sistema: se tem token salvo, confirma com a API antes de liberar a tela.
+  // Confirmar aqui evita o painel abrir "logado" com um token vencido e só descobrir
+  // isso quando a primeira listagem falhar.
   useEffect(() => {
-    async function loadStoragedData() {
-      const storagedToken = localStorage.getItem(STORAGE_KEYS.token)
-      const storagedUser = localStorage.getItem(STORAGE_KEYS.user)
+    let cancelled = false
 
-      if (!storagedToken) {
-        setLoading(false)
+    async function restoreSession() {
+      const token = localStorage.getItem(STORAGE_KEYS.token)
+
+      if (!token) {
+        if (!cancelled) setLoading(false)
         return
       }
 
-      // Mostra na hora o que estava salvo, pra tela não piscar vazia
-      if (storagedUser) {
-        try {
-          setUser(JSON.parse(storagedUser) as User)
-        } catch {
-          // Se o JSON estiver corrompido, melhor começar de novo
-          clearSession()
-          setLoading(false)
-          return
-        }
+      try {
+        await loadProfile()
+      } catch {
+        // O interceptor do api.ts já avisou a pessoa e limpou o que precisava
+        if (!cancelled) clearSession()
+      } finally {
+        if (!cancelled) setLoading(false)
       }
-
-      // E confirma com a API, que também traz o unit_code atualizado
-      await fetchProfile()
-      setLoading(false)
     }
 
-    loadStoragedData()
-  }, [clearSession, fetchProfile])
+    restoreSession()
 
-  async function signIn(email: string, password: string) {
-    try {
-      const { data } = await api.post("/login", { email, password })
-      const { token, person, access_log_id } = data
-
-      if (!token) {
-        throw new Error("Token não recebido do servidor")
-      }
-
-      localStorage.setItem(STORAGE_KEYS.token, token)
-
-      // Guarda o ID do log de acesso: é ele que o logout usa pra fechar a sessão
-      if (access_log_id) {
-        localStorage.setItem(STORAGE_KEYS.accessLogId, String(access_log_id))
-      }
-
-      // O /login devolve só o básico, então já salva ele pra não ficar sem nada na tela
-      const basicUser: User = {
-        id: person.id,
-        email: person.email,
-        full_name: person.full_name,
-        type: person.type,
-        unit_id: person.unit_id,
-      }
-      localStorage.setItem(STORAGE_KEYS.user, JSON.stringify(basicUser))
-      setUser(basicUser)
-
-      // Agora busca o perfil completo, que é o que traz o unit_code
-      await fetchProfile()
-    } catch (error: any) {
-      // Se veio uma lista de campos inválidos, mostra o primeiro (é o mais útil)
-      const details = error.response?.data?.details
-      const firstDetail = Array.isArray(details) && details.length > 0 ? details[0].message : null
-
-      throw new Error(
-        firstDetail || error.response?.data?.message || error.response?.data?.error || "Erro ao fazer login",
-      )
+    return () => {
+      cancelled = true
     }
-  }
+  }, [clearSession, loadProfile])
 
-  async function signOut() {
+  const signIn = useCallback(
+    async (email: string, password: string) => {
+      const { data } = await api.post<LoginResponse>("/login", { email, password })
+
+      if (!data.token) throw new Error("A API não devolveu token de acesso")
+
+      localStorage.setItem(STORAGE_KEYS.token, data.token)
+
+      // Guardado pra conseguir fechar a sessão no logout (a API pede o id do registro)
+      if (data.access_log_id) {
+        localStorage.setItem(STORAGE_KEYS.accessLogId, String(data.access_log_id))
+      }
+
+      try {
+        await loadProfile()
+      } catch (error) {
+        // Logou mas não deu pra ler o perfil: melhor derrubar a sessão do que
+        // deixar a pessoa num painel sem unidade, onde nada carrega.
+        clearSession()
+        throw new Error(apiErrorMessage(error, "Entrei, mas não consegui carregar seu perfil."))
+      }
+    },
+    [clearSession, loadProfile],
+  )
+
+  const signOut = useCallback(async () => {
     const accessLogId = localStorage.getItem(STORAGE_KEYS.accessLogId)
 
-    // Avisa a API que a sessão terminou, pra ela calcular a duração no histórico
+    // Avisa a API pra fechar o registro de sessão. Se falhar, sai do mesmo jeito:
+    // prender a pessoa numa sessão que ela pediu pra encerrar seria pior.
     if (accessLogId) {
       try {
         await api.post("/logout", { access_log_id: Number(accessLogId) })
-      } catch (error) {
-        // Se a API falhar, o logout local acontece de qualquer jeito:
-        // é pior deixar o usuário preso logado do que perder o registro de saída
-        console.error("Não deu pra registrar a saída na API:", error)
+      } catch {
+        // silêncio proposital: o logout local acontece de qualquer jeito
       }
     }
 
     clearSession()
-  }
+  }, [clearSession])
 
-  return (
-    <AuthContext.Provider
-      value={{
-        signed: !!user,
-        user,
-        loading,
-        signIn,
-        signOut,
-        refreshUser: async () => {
-          await fetchProfile()
-        },
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
+  const refresh = useCallback(async () => {
+    await loadProfile()
+  }, [loadProfile])
+
+  const value = useMemo(
+    () => ({ user, loading, signIn, signOut, refresh }),
+    [user, loading, signIn, signOut, refresh],
   )
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
-export function useAuth() {
+export function useAuth(): AuthContextValue {
   const context = useContext(AuthContext)
 
-  if (!context) {
-    throw new Error("useAuth deve ser usado dentro de um AuthProvider")
-  }
-
+  if (!context) throw new Error("useAuth precisa estar dentro de um AuthProvider")
   return context
 }
 
 /**
- * Atalho pra pegar o código da unidade do usuário logado.
- * Quase toda listagem precisa dele, então fica num hook só pra não repetir a lógica
- * (e pra ninguém voltar a chumbar "ETE001" na tela).
+ * Atalho pro código da unidade do usuário. Quase toda listagem precisa dele,
+ * e nenhuma deve buscar antes de ele existir.
  */
-export function useUnitCode(): string | undefined {
-  const { user } = useAuth()
-  return user?.unit_code
+export function useUnitCode(): string | null {
+  return useAuth().user?.unit_code ?? null
 }

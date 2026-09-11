@@ -1,261 +1,290 @@
-import type React from "react"
+/**
+ * CreatePerson.tsx - A primeira etapa do cadastro: a pessoa
+ * # Pra que serve?
+ * - Cadastrar quem é a pessoa, uma vez só, independente do perfil que ela terá
+ * - Explicar que falta a segunda etapa, que é onde o perfil é criado
+ * Feito por: Arthur Roberto Weege Pontes
+ * Versão: 2.0.0
+ * Data: 2026-09-10
+ * Alterações:
+ * - v1.0.0 (2025-08-19): Primeira versão do cadastro
+ * - v2.0.0 (2026-09-10): Reescrita. O erro do servidor agora aparece embaixo do campo
+ *                        que ele reclamou, e a tela diz qual é o próximo passo.
+ *
+ * Por que em duas etapas: assim ninguém aparece duplicado quando é aluno e depois
+ * vira funcionário — a pessoa é a mesma, o que muda é o perfil pendurado nela.
+ */
 
-import { useState, useEffect } from "react"
-import { useNavigate } from "react-router-dom"
-import { ArrowLeft } from "lucide-react"
+import { useState } from "react"
+import { Link, useNavigate } from "react-router-dom"
+import { AlertCircle, ArrowLeft, Check } from "lucide-react"
+import { useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
+import { api } from "@/lib/api"
+import { useAuth } from "@/contexts/AuthContext"
+import { useApiForm } from "@/hooks/useApiForm"
+import { maskCpf, maskPhone } from "@/lib/format"
+import { PERSON_TYPE_LABELS } from "@/lib/labels"
+import { PERSON_TYPES, UNIT_TYPES, type PersonType, type UnitType } from "@/types/api"
+import { PageHeader, Panel } from "@/components/data/Primitives"
+import { FormActions, FormField, FormGrid, TextField } from "@/components/form/FormField"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { api } from "@/services/api"
-import type { PersonTypeEnum, UnitTypeEnum, Unit, Role } from "../../types"
-import { useToast } from "@/hooks/use-toast"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+
+/** Pra onde mandar a pessoa depois de cadastrar, conforme o perfil escolhido. */
+const NEXT_STEP: Partial<Record<PersonType, { label: string; to: string }>> = {
+  student: { label: "Cadastrar os dados de aluno", to: "/students/create" },
+  teacher: { label: "Cadastrar os dados de professor", to: "/teachers/create" },
+  employee: { label: "Cadastrar os dados de funcionário", to: "/employees/create" },
+  coordinator: { label: "Cadastrar os dados de funcionário", to: "/employees/create" },
+  inspector: { label: "Cadastrar os dados de funcionário", to: "/employees/create" },
+  visitor: { label: "Cadastrar os dados de visitante", to: "/visitors/create" },
+}
 
 export default function CreatePerson() {
-  const [personType, setPersonType] = useState<PersonTypeEnum>("student")
-  const [units, setUnits] = useState<Unit[]>([])
-  const [roles, setRoles] = useState<Role[]>([])
-  const [formData, setFormData] = useState({
-    // Person - ETAPA 1 (dados básicos apenas)
+  const { user } = useAuth()
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+
+  const [created, setCreated] = useState<{ name: string; type: PersonType } | null>(null)
+
+  const form = useApiForm({
     full_name: "",
-    birth_date: "",
     cpf: "",
     email: "",
     phone: "",
-    main_unit_type: "Fatec" as UnitTypeEnum,
-    registration_unit_id: "",
+    birth_date: "",
+    type: "student" as PersonType,
+    main_unit_type: (user?.unit_code?.startsWith("FAT") ? "Fatec" : "Etec") as UnitType,
   })
-  const [loading, setLoading] = useState(false)
-  const navigate = useNavigate()
-  const { toast } = useToast()
 
-  useEffect(() => {
-    loadData()
-  }, [])
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault()
 
-  const loadData = async () => {
-    try {
-      const unitsRes = await api.get("/units")
-      setUnits(Array.isArray(unitsRes.data) ? unitsRes.data : unitsRes.data.units || [])
+    if (!user?.unit_code) {
+      toast.error("Sua conta não está vinculada a uma unidade.")
+      return
+    }
 
-      // Fetch roles from backend instead of hardcoded
-      const rolesRes = await api.get("/roles")
-      const rolesData = Array.isArray(rolesRes.data) ? rolesRes.data : rolesRes.data.roles || []
-      setRoles(rolesData)
-    } catch (error: any) {
-      toast({
-        title: "Erro ao carregar dados",
-        description: error.message,
-        variant: "destructive",
+    const ok = await form.submit(async (values) => {
+      await api.post("/people", {
+        full_name: values.full_name.trim(),
+        cpf: values.cpf,
+        email: values.email.trim(),
+        phone: values.phone,
+        // A API só aceita a data quando ela existe: string vazia é erro de formato
+        ...(values.birth_date ? { birth_date: values.birth_date } : {}),
+        type: values.type,
+        main_unit_type: values.main_unit_type,
+        unit_code: user.unit_code,
       })
-      // Fallback to empty arrays if fetch fails
-      setRoles([])
+    })
+
+    if (ok) {
+      toast.success("Pessoa cadastrada", { description: form.values.full_name })
+      queryClient.invalidateQueries({ queryKey: ["people"] })
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] })
+      setCreated({ name: form.values.full_name, type: form.values.type })
     }
   }
 
-  const handleChange = (field: string, value: any) => {
-    setFormData((prev) => ({ ...prev, [field]: value }))
-  }
+  // Cadastrou: em vez de sumir da tela, explica o que falta pra pessoa existir de fato
+  if (created) {
+    const next = NEXT_STEP[created.type]
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
+    return (
+      <>
+        <PageHeader title="Pessoa cadastrada" />
 
-    try {
-      const selectedUnit = units.find((u) => u.id === Number.parseInt(formData.registration_unit_id))
-      if (!selectedUnit) {
-        throw new Error("Unidade não encontrada")
-      }
+        <Panel>
+          <div className="flex items-start gap-3">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-authorized/10 text-authorized">
+              <Check className="h-5 w-5" aria-hidden />
+            </span>
+            <div className="min-w-0">
+              <p className="font-medium">{created.name} está no cadastro.</p>
+              <p className="mt-1 text-[0.8125rem] text-muted-foreground">
+                Falta a segunda etapa: sem ela a pessoa não aparece na listagem de{" "}
+                {PERSON_TYPE_LABELS[created.type].toLowerCase()}s, porque o perfil ainda
+                não existe.
+              </p>
 
-      const personData: any = {
-        full_name: formData.full_name,
-        birth_date: formData.birth_date || undefined,
-        cpf: formData.cpf,
-        email: formData.email,
-        phone: formData.phone || "",
-        type: personType,
-        main_unit_type: formData.main_unit_type,
-        unit_code: selectedUnit.unit_code,
-      }
-
-      const response = await api.post("/people", personData)
-
-      if (!response.data || !response.data.id) {
-        throw new Error("Resposta inválida do servidor")
-      }
-
-      toast({
-        title: "Etapa 1 Concluída!",
-        description: `Pessoa cadastrada com sucesso. Redirecionando para completar o cadastro de ${
-          personType === "teacher"
-            ? "professor"
-            : personType === "student"
-              ? "estudante"
-              : personType === "visitor"
-                ? "visitante"
-                : "funcionário"
-        }.`,
-      })
-
-      if (personType === "employee" || personType === "coordinator" || personType === "inspector") {
-        navigate(`/employees/create?cpf=${formData.cpf}`)
-      } else if (personType === "teacher") {
-        navigate(`/employees/create?cpf=${formData.cpf}&next=teacher`)
-      } else if (personType === "student") {
-        navigate(`/students/create?cpf=${formData.cpf}`)
-      } else if (personType === "visitor") {
-        navigate(`/visitors/create?cpf=${formData.cpf}`)
-      } else {
-        navigate("/people")
-      }
-    } catch (error: any) {
-      console.error("Error creating person:", error)
-      toast({
-        title: "Erro ao criar pessoa",
-        description: error.response?.data?.message || error.response?.data?.error || error.message,
-        variant: "destructive",
-      })
-    } finally {
-      setLoading(false)
-    }
+              <div className="mt-4 flex flex-wrap gap-2">
+                {next && (
+                  <Button asChild>
+                    <Link to={next.to}>{next.label}</Link>
+                  </Button>
+                )}
+                <Button variant="outline" onClick={() => { form.reset(); setCreated(null) }}>
+                  Cadastrar outra pessoa
+                </Button>
+                <Button variant="ghost" asChild>
+                  <Link to="/people">Ver a lista de pessoas</Link>
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Panel>
+      </>
+    )
   }
 
   return (
-    <div className="space-y-6 animate-fade-in max-w-3xl mx-auto">
-      <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" onClick={() => navigate("/people")}>
-          <ArrowLeft className="w-5 h-5" />
-        </Button>
-        <div>
-          <h1 className="text-3xl font-bold">Nova Pessoa - Etapa 1</h1>
-          <p className="text-muted-foreground">Cadastre os dados básicos da pessoa</p>
-        </div>
-      </div>
+    <>
+      <PageHeader
+        title="Cadastrar pessoa"
+        description="Primeira etapa: quem é a pessoa. Depois você vincula o perfil dela."
+        action={
+          <Button variant="outline" onClick={() => navigate(-1)}>
+            <ArrowLeft className="mr-1.5 h-4 w-4" aria-hidden />
+            Voltar
+          </Button>
+        }
+      />
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Informações Básicas - ETAPA 1 */}
-        <Card className="shadow-card">
-          <CardHeader>
-            <CardTitle>Informações Básicas</CardTitle>
-            <CardDescription>Preencha os dados pessoais e de contato (Etapa 1 de 2)</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="personType">Tipo de Pessoa *</Label>
-              <Select value={personType} onValueChange={(v) => setPersonType(v as PersonTypeEnum)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="student">Aluno</SelectItem>
-                  <SelectItem value="employee">Funcionário</SelectItem>
-                  <SelectItem value="teacher">Professor</SelectItem>
-                  <SelectItem value="visitor">Visitante</SelectItem>
-                  <SelectItem value="coordinator">Coordenador</SelectItem>
-                  <SelectItem value="inspector">Inspetor</SelectItem>
-                </SelectContent>
-              </Select>
+      <form onSubmit={handleSubmit} className="max-w-3xl">
+        <Panel>
+          {form.formError && (
+            <div
+              role="alert"
+              className="mb-4 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-2.5 text-[0.8125rem] text-destructive"
+            >
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+              <span>{form.formError}</span>
             </div>
+          )}
 
-            <div className="space-y-2">
-              <Label htmlFor="full_name">Nome Completo *</Label>
-              <Input
-                id="full_name"
-                value={formData.full_name}
-                onChange={(e) => handleChange("full_name", e.target.value)}
+          <div className="space-y-4">
+            <TextField
+              label="Nome completo"
+              required
+              value={form.values.full_name}
+              onChange={(value) => form.setValue("full_name", value)}
+              error={form.errors.full_name}
+              autoComplete="name"
+              maxLength={100}
+            />
+
+            <FormGrid>
+              <TextField
+                label="CPF"
                 required
+                value={form.values.cpf}
+                onChange={(value) => form.setValue("cpf", maskCpf(value))}
+                error={form.errors.cpf}
+                placeholder="000.000.000-00"
+                hint="A API confere os dígitos verificadores."
               />
-            </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="cpf">CPF *</Label>
-              <Input id="cpf" value={formData.cpf} onChange={(e) => handleChange("cpf", e.target.value)} required />
-            </div>
+              <TextField
+                label="Telefone"
+                required
+                value={form.values.phone}
+                onChange={(value) => form.setValue("phone", maskPhone(value))}
+                error={form.errors.phone}
+                placeholder="(12) 99999-9999"
+              />
+            </FormGrid>
 
-            <div className="space-y-2">
-              <Label htmlFor="email">E-mail *</Label>
-              <Input
-                id="email"
+            <FormGrid>
+              <TextField
+                label="E-mail"
+                required
                 type="email"
-                value={formData.email}
-                onChange={(e) => handleChange("email", e.target.value)}
+                value={form.values.email}
+                onChange={(value) => form.setValue("email", value)}
+                error={form.errors.email}
+                autoComplete="email"
+                maxLength={100}
+                hint="É por aqui que sai a senha temporária, quando o perfil tem login."
+              />
+
+              <FormField label="Data de nascimento" error={form.errors.birth_date}>
+                {({ id, describedBy, invalid }) => (
+                  <Input
+                    id={id}
+                    type="date"
+                    value={form.values.birth_date}
+                    onChange={(event) => form.setValue("birth_date", event.target.value)}
+                    aria-describedby={describedBy}
+                    aria-invalid={invalid}
+                    max={new Date().toISOString().slice(0, 10)}
+                  />
+                )}
+              </FormField>
+            </FormGrid>
+
+            <FormGrid>
+              <FormField label="Perfil" required error={form.errors.type}>
+                {({ id }) => (
+                  <Select
+                    value={form.values.type}
+                    onValueChange={(value) => form.setValue("type", value as PersonType)}
+                  >
+                    <SelectTrigger id={id}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PERSON_TYPES.map((type) => (
+                        <SelectItem key={type} value={type}>
+                          {PERSON_TYPE_LABELS[type]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </FormField>
+
+              <FormField
+                label="Tipo de unidade"
                 required
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="birth_date">Data de Nascimento</Label>
-              <Input
-                id="birth_date"
-                type="date"
-                value={formData.birth_date}
-                onChange={(e) => handleChange("birth_date", e.target.value)}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="phone">Telefone</Label>
-              <Input id="phone" value={formData.phone} onChange={(e) => handleChange("phone", e.target.value)} />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="main_unit_type">Tipo de Unidade Principal *</Label>
-              <Select value={formData.main_unit_type} onValueChange={(v) => handleChange("main_unit_type", v)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Fatec">FATEC</SelectItem>
-                  <SelectItem value="Etec">ETEC</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="registration_unit_id">Unidade de Registro *</Label>
-              <Select
-                value={formData.registration_unit_id}
-                onValueChange={(v) => handleChange("registration_unit_id", v)}
+                error={form.errors.main_unit_type}
+                hint="Se a pessoa é de Etec ou de Fatec."
               >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione a unidade" />
-                </SelectTrigger>
-                <SelectContent>
-                  {units.map((u) => (
-                    <SelectItem key={u.id} value={u.id.toString()}>
-                      {u.name} - {u.unit_type}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </CardContent>
-        </Card>
+                {({ id }) => (
+                  <Select
+                    value={form.values.main_unit_type}
+                    onValueChange={(value) => form.setValue("main_unit_type", value as UnitType)}
+                  >
+                    <SelectTrigger id={id}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {UNIT_TYPES.map((type) => (
+                        <SelectItem key={type} value={type}>
+                          {type}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </FormField>
+            </FormGrid>
 
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <p className="text-sm text-blue-900">
-            <strong>Próximo passo:</strong> Após salvar, você será redirecionado para preencher os dados específicos de{" "}
-            {personType === "teacher"
-              ? "professor (Etapa 2a: Funcionário, Etapa 2b: Professor)"
-              : personType === "student"
-                ? "estudante"
-                : personType === "visitor"
-                  ? "visitante"
-                  : "funcionário"}
-            .
-          </p>
-        </div>
+            <p className="rounded-md border border-border bg-muted/40 p-2.5 text-[0.8125rem] text-muted-foreground">
+              A pessoa será cadastrada na unidade{" "}
+              <span className="identifier text-foreground">{user?.unit_code ?? "—"}</span>
+              {user?.unit_name ? " (" + user.unit_name + ")" : ""}, que é a sua.
+            </p>
+          </div>
 
-        <div className="flex gap-4">
-          <Button type="button" variant="outline" onClick={() => navigate("/people")}>
-            Cancelar
-          </Button>
-          <Button type="submit" className="gradient-primary" disabled={loading}>
-            {loading ? "Salvando..." : "Continuar para Etapa 2"}
-          </Button>
-        </div>
+          <FormActions>
+            <Button type="button" variant="ghost" asChild>
+              <Link to="/people">Cancelar</Link>
+            </Button>
+            <Button type="submit" disabled={form.submitting}>
+              {form.submitting ? "Cadastrando..." : "Cadastrar pessoa"}
+            </Button>
+          </FormActions>
+        </Panel>
       </form>
-    </div>
+    </>
   )
 }

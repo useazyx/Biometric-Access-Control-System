@@ -1,360 +1,221 @@
-import { useState, useEffect } from "react"
-import { useNavigate } from "react-router-dom"
-import { Fingerprint, Trash2, Search, Eye, Settings } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
-import { api } from "@/services/api"
-import { Skeleton } from "@/components/ui/skeleton"
-import type { Biometric } from "@/types"
-import { useToast } from "@/hooks/use-toast"
-import { useConfirm } from "@/hooks/use-confirm"
-import { DialogDetails } from "@/components/ui/dialog-details"
+/**
+ * BiometricsList.tsx - As digitais registradas na unidade
+ * # Pra que serve?
+ * - Ver de quem é cada digital e qual dedo foi registrado
+ * - Remover uma digital específica quando ela precisa ser recadastrada
+ * Feito por: Arthur Roberto Weege Pontes
+ * Versão: 2.0.0
+ * Data: 2026-09-10
+ * Alterações:
+ * - v1.0.0 (2025-09-01): Primeira versão da listagem
+ * - v2.0.0 (2026-09-10): Reescrita com paginação de servidor. A busca desta tela é
+ *                        local: a rota de digitais não aceita o parâmetro de busca.
+ */
+
+import { useCallback, useState } from "react"
+import { Link } from "react-router-dom"
+import { Fingerprint, Plus, Trash2 } from "lucide-react"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
+import { api, apiErrorMessage } from "@/lib/api"
 import { useUnitCode } from "@/contexts/AuthContext"
+import { usePagedList } from "@/hooks/usePagedList"
+import { formatDateTime, orDash } from "@/lib/format"
+import { FINGER_LABELS, labelOf } from "@/lib/labels"
+import type { BiometricRow } from "@/types/api"
+import { PageHeader, PersonCell, StatusBadge } from "@/components/data/Primitives"
+import { Column, DataTable } from "@/components/data/DataTable"
+import { Pagination } from "@/components/data/Pagination"
+import { Toolbar } from "@/components/data/Toolbar"
+import { Button } from "@/components/ui/button"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 
 export default function BiometricsList() {
-  const [biometrics, setBiometrics] = useState<Biometric[]>([])
-  const [loading, setLoading] = useState(true)
-  const [searchTerm, setSearchTerm] = useState("")
-  const [selectedBiometric, setSelectedBiometric] = useState<any>(null)
-  const [detailsOpen, setDetailsOpen] = useState(false)
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const [managementSearchTerm, setManagementSearchTerm] = useState("")
-  const { toast } = useToast()
-  const { confirmar, ConfirmDialog } = useConfirm()
-  const navigate = useNavigate()
-  // Unidade do usuário logado: é o filtro de toda listagem
   const unitCode = useUnitCode()
+  const queryClient = useQueryClient()
 
-  useEffect(() => {
-    // Enquanto o perfil não chegou a gente não sabe qual unidade consultar
-    if (!unitCode) return
-    loadBiometrics()
-  }, [unitCode])
+  const [pendingDelete, setPendingDelete] = useState<BiometricRow | null>(null)
 
-  const loadBiometrics = async () => {
-    try {
-      setLoading(true)
-      const response = await api.get("/biometrics", {
-        params: { unit_code: unitCode, page: "1", page_size: "1000" },
+  // A rota de digitais não tem busca no servidor, então filtra o que já veio.
+  // Precisa ser estável entre renders, senão o hook refaz a consulta à toa.
+  const clientFilter = useCallback((row: BiometricRow, term: string) => {
+    const name = row.person?.full_name?.toLowerCase() ?? ""
+    const cpf = row.person?.cpf?.toLowerCase() ?? ""
+    return name.includes(term) || cpf.includes(term)
+  }, [])
+
+  const list = usePagedList<BiometricRow>({
+    queryKey: "biometrics",
+    endpoint: "/biometrics",
+    itemsKey: "biometrics",
+    enabled: Boolean(unitCode),
+    params: { unit_code: unitCode ?? "" },
+    clientFilter,
+  })
+
+  const remove = useMutation({
+    mutationFn: async (row: BiometricRow) => {
+      // A API apaga pela dupla pessoa + dedo, não pelo id da digital
+      await api.delete("/biometrics", {
+        data: { cpf: row.person?.cpf, finger: row.finger },
       })
-
-
-      let data: any[] = []
-      if (Array.isArray(response.data?.biometrics)) {
-        data = response.data.biometrics
-      } else if (Array.isArray(response.data)) {
-        data = response.data
-      }
-
-      const processedData = data.map((item: any) => ({
-        ...item,
-        registration_date:
-          typeof item.registration_date === "string"
-            ? item.registration_date
-            : new Date(item.registration_date).toISOString(),
-      }))
-
-
-      setBiometrics(processedData)
-    } catch (error: any) {
-      console.error("Error loading biometrics:", error)
-      let errorMessage = "Erro ao carregar biometrias"
-      if (error.response?.status === 500) {
-        errorMessage = `Erro no servidor: ${error.response?.data?.message || error.message}`
-      } else if (error.response?.status === 400) {
-        errorMessage = `Erro de validação: ${error.response?.data?.error || "Parâmetros inválidos"}`
-      } else {
-        errorMessage = error.message
-      }
-      toast({
-        title: "Erro ao carregar biometrias",
-        description: errorMessage,
-        variant: "destructive",
+    },
+    onSuccess: (_, row) => {
+      toast.success("Digital removida", {
+        description: labelOf(FINGER_LABELS, row.finger) + " de " + (row.person?.full_name ?? "—"),
       })
-    } finally {
-      setLoading(false)
-    }
-  }
+      queryClient.invalidateQueries({ queryKey: ["biometrics"] })
+      setPendingDelete(null)
+    },
+    onError: (error) => {
+      toast.error(apiErrorMessage(error, "Não consegui remover essa digital."))
+    },
+  })
 
-
-  const handleDelete = async (biometric: any) => {
-    const confirmado = await confirmar({
-      title: "Excluir esta digital?",
-      description: "A pessoa continua cadastrada, mas essa digital não vai mais abrir a catraca.",
-      confirmLabel: "Excluir digital",
-    })
-    if (!confirmado) return
-
-    try {
-      // Backend requer cpf e finger no body do DELETE /biometrics
-      if (!biometric.person?.cpf || !biometric.finger) {
-        toast({
-          title: "Erro",
-          description: "Dados insuficientes para excluir a biometria",
-          variant: "destructive",
-        })
-        return
-      }
-      await api.delete("/biometrics", { 
-        data: { 
-          cpf: biometric.person.cpf,
-          finger: biometric.finger
-        } 
-      })
-      toast({
-        title: "Biometria excluída",
-        description: "O registro foi removido com sucesso.",
-      })
-      loadBiometrics()
-    } catch (error: any) {
-      toast({
-        title: "Erro ao excluir biometria",
-        description: error.response?.data?.message || error.message,
-        variant: "destructive",
-      })
-    }
-  }
-
-  const filteredBiometrics = biometrics.filter(
-    (bio: any) =>
-      searchTerm === "" ||
-      bio.person?.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      bio.person?.cpf?.includes(searchTerm) ||
-      bio.finger.toLowerCase().includes(searchTerm.toLowerCase()),
-  )
-
-  const getFingerLabel = (finger: string) => {
-    const fingers: Record<string, string> = {
-      thumb_right: "Polegar Direito",
-      index_right: "Indicador Direito",
-      middle_right: "Médio Direito",
-      ring_right: "Anelar Direito",
-      pinky_right: "Mínimo Direito",
-      thumb_left: "Polegar Esquerdo",
-      index_left: "Indicador Esquerdo",
-      middle_left: "Médio Esquerdo",
-      ring_left: "Anelar Esquerdo",
-      pinky_left: "Mínimo Esquerdo",
-    }
-    return fingers[finger] || finger
-  }
+  const columns: Column<BiometricRow>[] = [
+    {
+      key: "person",
+      header: "Pessoa",
+      cell: (row) => <PersonCell name={row.person?.full_name} cpf={row.person?.cpf} />,
+    },
+    {
+      key: "finger",
+      header: "Dedo",
+      cell: (row) => (
+        <span className="flex items-center gap-1.5">
+          <Fingerprint className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          {labelOf(FINGER_LABELS, row.finger)}
+        </span>
+      ),
+    },
+    {
+      key: "device",
+      header: "Sensor",
+      hideBelow: "sm",
+      cell: (row) => <StatusBadge tone="neutral">{orDash(row.device)}</StatusBadge>,
+    },
+    {
+      key: "unit",
+      header: "Unidade",
+      hideBelow: "lg",
+      cell: (row) => (
+        <span className="identifier text-muted-foreground">{row.unit?.unit_code ?? "—"}</span>
+      ),
+    },
+    {
+      key: "registered",
+      header: "Registrada em",
+      align: "right",
+      hideBelow: "md",
+      cell: (row) => (
+        <span className="numeric whitespace-nowrap text-muted-foreground">
+          {formatDateTime(row.registration_date)}
+        </span>
+      ),
+    },
+    {
+      key: "actions",
+      header: <span className="sr-only">Ações</span>,
+      align: "right",
+      width: "3.5rem",
+      cell: (row) => (
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="text-muted-foreground hover:text-destructive"
+          onClick={() => setPendingDelete(row)}
+          aria-label="Remover esta digital"
+        >
+          <Trash2 className="h-4 w-4" aria-hidden />
+        </Button>
+      ),
+    },
+  ]
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Gestão de Biometrias</h1>
-          <p className="text-muted-foreground">Registre e gerencie dados biométricos</p>
-        </div>
-        <div className="flex gap-2">
-          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-            <DialogTrigger asChild>
-              <Button className="gradient-primary">
-                <Settings className="mr-2 w-4 h-4" />
-                Gerenciar Biometrias
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>Gerenciar Biometrias</DialogTitle>
-                <DialogDescription>Selecione uma biometria para excluir</DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Buscar biometrias..."
-                    value={managementSearchTerm}
-                    onChange={(e) => setManagementSearchTerm(e.target.value)}
-                    className="pl-9"
-                  />
-                </div>
-                <div className="max-h-[400px] overflow-y-auto space-y-2">
-                  {filteredBiometrics
-                    .filter((bio: any) =>
-                      managementSearchTerm === "" ||
-                      bio.person?.full_name?.toLowerCase().includes(managementSearchTerm.toLowerCase()) ||
-                      bio.person?.cpf?.includes(managementSearchTerm) ||
-                      bio.finger.toLowerCase().includes(managementSearchTerm.toLowerCase())
-                    )
-                    .length === 0 ? (
-                    <p className="text-center text-muted-foreground py-4">Nenhuma biometria encontrada</p>
-                  ) : (
-                    filteredBiometrics
-                      .filter((bio: any) =>
-                        managementSearchTerm === "" ||
-                        bio.person?.full_name?.toLowerCase().includes(managementSearchTerm.toLowerCase()) ||
-                        bio.person?.cpf?.includes(managementSearchTerm) ||
-                        bio.finger.toLowerCase().includes(managementSearchTerm.toLowerCase())
-                      )
-                      .map((biometric: any) => (
-                        <Card key={biometric.id} className="p-4">
-                          <div className="flex items-center justify-between">
-                            <div className="flex-1">
-                              <h4 className="font-semibold">{biometric.person?.full_name || "Desconhecido"}</h4>
-                              <p className="text-sm text-muted-foreground">CPF: {biometric.person?.cpf || "N/A"}</p>
-                              <p className="text-sm text-muted-foreground">
-                                Dedo: {getFingerLabel(biometric.finger)} • {new Date(biometric.registration_date).toLocaleDateString("pt-BR")}
-                              </p>
-                            </div>
-                            <Button
-                              variant="destructive"
-                              size="sm"
-                              onClick={() => {
-                                handleDelete(biometric)
-                                setDialogOpen(false)
-                              }}
-                            >
-                              <Trash2 className="mr-2 w-4 h-4" />
-                              Excluir
-                            </Button>
-                          </div>
-                        </Card>
-                      ))
-                  )}
-                </div>
-              </div>
-            </DialogContent>
-          </Dialog>
-          {/* Quem cadastra digital de verdade é a tela de registro, que pede a pessoa e o dedo */}
-          <Button onClick={() => navigate("/biometrics/register")}>
-            <Fingerprint className="mr-2 w-4 h-4" />
-            Cadastrar Digital
+    <>
+      <PageHeader
+        title="Digitais"
+        description="As biometrias registradas na sua unidade. Cada pessoa pode ter até dez, uma por dedo."
+        action={
+          <Button asChild>
+            <Link to="/biometrics/register">
+              <Plus className="mr-1.5 h-4 w-4" aria-hidden />
+              Registrar digital
+            </Link>
           </Button>
-        </div>
-      </div>
+        }
+      />
 
-      <Card className="shadow-card">
-        <CardHeader>
-          <CardTitle>Buscar Biometrias</CardTitle>
-          <CardDescription>Encontre registros por pessoa</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              placeholder="Buscar por nome, CPF ou dedo..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-9"
-            />
-          </div>
-        </CardContent>
-      </Card>
+      <Toolbar
+        search={list.search}
+        onSearchChange={list.setSearch}
+        searchPlaceholder="Filtrar esta página por nome ou CPF"
+      />
 
-      <div className="grid gap-4">
-        {loading ? (
-          <div className="grid gap-4 md:grid-cols-2">
-            {[...Array(4)].map((_, i) => (
-              <Card key={i} className="p-6">
-                <div className="flex items-center gap-3 mb-4">
-                  <Skeleton className="w-12 h-12 rounded-xl" />
-                  <div className="flex-1">
-                    <Skeleton className="h-4 w-48" />
-                    <Skeleton className="h-3 w-32 mt-2" />
-                  </div>
-                </div>
-                <Skeleton className="h-3 w-full" />
-                <Skeleton className="h-3 w-3/4 mt-2" />
-              </Card>
-            ))}
-          </div>
-        ) : filteredBiometrics.length === 0 ? (
-          <Card className="p-8 text-center">
-            <p className="text-muted-foreground">Nenhuma biometria encontrada</p>
-          </Card>
-        ) : (
-          filteredBiometrics.map((biometric: any) => (
-            <Card key={biometric.id} className="shadow-card hover:shadow-lg transition-smooth">
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-start gap-4 flex-1 min-w-0">
-                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center flex-shrink-0">
-                      <Fingerprint className="w-6 h-6 text-primary" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold mb-1">{biometric.person?.full_name || "Desconhecido"}</h3>
-                      <p className="text-sm text-muted-foreground font-mono">CPF: {biometric.person?.cpf || "N/A"}</p>
-                      <div className="space-y-1 text-sm text-muted-foreground mt-2">
-                        <p className="flex items-center gap-2">
-                          <span className="font-medium text-foreground">Dedo:</span>
-                          <span>{getFingerLabel(biometric.finger)}</span>
-                        </p>
-                        <p className="flex items-center gap-2">
-                          <span className="font-medium text-foreground">Dispositivo:</span>
-                          <span>{biometric.device}</span>
-                        </p>
-                        <p className="flex items-center gap-2">
-                          <span className="font-medium text-foreground">Data:</span>
-                          <span>{new Date(biometric.registration_date).toLocaleDateString("pt-BR")}</span>
-                        </p>
-                        {biometric.unit && (
-                          <p className="flex items-center gap-2">
-                            <span className="font-medium text-foreground">Unidade:</span>
-                            <span>{biometric.unit.name} ({biometric.unit.unit_code})</span>
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setSelectedBiometric(biometric);
-                      setDetailsOpen(true);
-                    }}
-                    className="flex-shrink-0"
-                  >
-                    <Eye className="mr-2 w-4 h-4" />
-                    Ver Detalhes
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))
-        )}
-      </div>
+      <DataTable
+        columns={columns}
+        rows={list.rows}
+        rowKey={(row) => row.id}
+        isLoading={list.isLoading}
+        isFetching={list.isFetching}
+        isError={list.isError}
+        error={list.error}
+        onRetry={list.refetch}
+        emptyTitle={list.search ? "Nenhuma digital encontrada" : "Nenhuma digital registrada"}
+        emptyDescription={
+          list.search
+            ? "A busca desta tela olha só a página atual."
+            : "Registre a primeira digital pra catraca começar a reconhecer as pessoas."
+        }
+      />
 
+      <Pagination
+        page={list.page}
+        pageSize={list.pageSize}
+        total={list.total}
+        totalPages={list.search ? 1 : list.totalPages}
+        onPageChange={list.setPage}
+        onPageSizeChange={list.setPageSize}
+        noun="digital"
+        nounPlural="digitais"
+        disabled={list.isFetching}
+      />
 
-      {selectedBiometric && (
-        <DialogDetails
-          open={detailsOpen}
-          onOpenChange={setDetailsOpen}
-          title={`Detalhes da Biometria - ${selectedBiometric.person?.full_name || "Desconhecido"}`}
-          description="Informações completas do registro biométrico"
-          details={[
-            { label: "Nome", value: selectedBiometric.person?.full_name || "N/A" },
-            { label: "CPF", value: selectedBiometric.person?.cpf || "N/A" },
-            { label: "Dedo", value: getFingerLabel(selectedBiometric.finger) },
-            { label: "Dispositivo", value: selectedBiometric.device || "N/A" },
-            {
-              label: "Data de Registro",
-              value: new Date(selectedBiometric.registration_date).toLocaleDateString("pt-BR"),
-            },
-            {
-              label: "Unidade",
-              value: selectedBiometric.unit
-                ? `${selectedBiometric.unit.name} (${selectedBiometric.unit.unit_code})`
-                : "N/A",
-            },
-          ]}
-        />
-      )}
-
-      {/* O diálogo de confirmação precisa existir na árvore pra poder abrir */}
-      <ConfirmDialog />
-
-    </div>
-
+      <AlertDialog open={Boolean(pendingDelete)} onOpenChange={(open) => !open && setPendingDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remover esta digital?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {labelOf(FINGER_LABELS, pendingDelete?.finger)} de{" "}
+              {pendingDelete?.person?.full_name ?? "—"}. A pessoa continua cadastrada, mas
+              perde o acesso por esse dedo até registrar de novo.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={remove.isPending}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => {
+                event.preventDefault()
+                if (pendingDelete) remove.mutate(pendingDelete)
+              }}
+              disabled={remove.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {remove.isPending ? "Removendo..." : "Remover"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   )
 }

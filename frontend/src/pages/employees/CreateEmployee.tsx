@@ -1,315 +1,203 @@
-import type React from "react"
-import { useState, useEffect } from "react"
-import { useNavigate, useSearchParams } from "react-router-dom"
+/**
+ * CreateEmployee.tsx - A segunda etapa do cadastro de um funcionário
+ * # Pra que serve?
+ * - Vincular matrícula e cargo a uma pessoa já cadastrada
+ * - Avisar que certos cargos dão login no sistema web, e que a senha vai por e-mail
+ * Feito por: Arthur Roberto Weege Pontes
+ * Versão: 2.0.0
+ * Data: 2026-09-10
+ * Alterações:
+ * - v1.0.0 (2025-08-23): Primeira versão
+ * - v2.0.0 (2026-09-10): Reescrita. Os cargos agora vêm do GET /roles em vez de
+ *                        estarem escritos na mão dentro da tela.
+ */
+
+import { Link, useNavigate } from "react-router-dom"
 import { ArrowLeft } from "lucide-react"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
+import { api } from "@/lib/api"
+import { useApiForm } from "@/hooks/useApiForm"
+import { maskCpf } from "@/lib/format"
+import type { Role } from "@/types/api"
+import { PageHeader, Panel } from "@/components/data/Primitives"
+import { FormActions, FormField, FormGrid, TextField } from "@/components/form/FormField"
+import { FormAlert } from "@/components/form/FormAlert"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Checkbox } from "@/components/ui/checkbox"
-import { api } from "@/services/api"
-import { useToast } from "@/hooks/use-toast"
-import { normalizeSubject } from "@/utils/subjectNormalizer"
-import type { Role } from "@/types"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
 export default function CreateEmployee() {
-  const [searchParams] = useSearchParams()
-  const cpf = searchParams.get("cpf") || ""
-  const nextStep = searchParams.get("next") // "teacher" se for professor
   const navigate = useNavigate()
-  const { toast } = useToast()
-  const [loading, setLoading] = useState(false)
-  const [roles, setRoles] = useState<Role[]>([])
-  const [formData, setFormData] = useState({
+  const queryClient = useQueryClient()
+
+  const roles = useQuery({
+    queryKey: ["roles"],
+    queryFn: async () => {
+      const { data } = await api.get<{ roles: Role[] }>("/roles")
+      // Do cargo mais poderoso pro menos, que é como a coordenação pensa a hierarquia
+      return (data.roles ?? []).sort((a, b) => b.permission_level - a.permission_level)
+    },
+  })
+
+  const form = useApiForm({
+    cpf: "",
     registration_number: "",
-    admission_date: "",
     role_id: "",
+    admission_date: "",
     active: true,
   })
-  const [teacherData, setTeacherData] = useState({
-    subjects: [] as string[],
-    can_teach_fatec: false,
-    can_teach_etec: false,
-  })
-  const [currentSubject, setCurrentSubject] = useState("")
 
-  useEffect(() => {
-    loadRoles()
-  }, [])
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault()
 
-  const loadRoles = async () => {
-    try {
-      const response = await api.get("/roles")
-      const rolesData = Array.isArray(response.data) ? response.data : response.data.roles || []
-      setRoles(rolesData)
-    } catch (error: any) {
-      toast({
-        title: "Erro ao carregar cargos",
-        description: error.message,
-        variant: "destructive",
+    if (!form.values.role_id) {
+      form.setFieldErrors({ role_id: "Escolhe um cargo" })
+      return
+    }
+
+    const ok = await form.submit(async (values) => {
+      await api.post("/employees", {
+        cpf: values.cpf,
+        registration_number: values.registration_number.trim(),
+        role_id: Number(values.role_id),
+        active: values.active,
+        ...(values.admission_date ? { admission_date: values.admission_date } : {}),
       })
-    }
-  }
+    })
 
-  const handleChange = (field: string, value: any) => {
-    setFormData((prev) => ({ ...prev, [field]: value }))
-  }
-
-  const handleAddSubject = () => {
-    if (currentSubject.trim()) {
-      const normalized = normalizeSubject(currentSubject.trim())
-      if (!teacherData.subjects.includes(normalized)) {
-        setTeacherData((prev) => ({
-          ...prev,
-          subjects: [...prev.subjects, normalized],
-        }))
-        setCurrentSubject("")
-      }
-    }
-  }
-
-  const handleRemoveSubject = (subject: string) => {
-    setTeacherData((prev) => ({
-      ...prev,
-      subjects: prev.subjects.filter((s) => s !== subject),
-    }))
-  }
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-
-    try {
-      if (!cpf) {
-        throw new Error("CPF não encontrado")
-      }
-
-      // Primeiro cria o funcionário
-      const employeeData = {
-        cpf: cpf.replace(/\D/g, ""),
-        registration_number: formData.registration_number,
-        role_id: Number.parseInt(formData.role_id),
-        admission_date: formData.admission_date || undefined,
-        active: formData.active,
-      }
-
-      const employeeResponse = await api.post("/employees", employeeData)
-
-      if (employeeResponse.data) {
-        toast({
-          title: "Funcionário cadastrado com sucesso!",
-          description: nextStep === "teacher" ? "Agora vamos cadastrar como professor..." : "Funcionário registrado no sistema.",
-        })
-
-        // Se for professor, cria o registro de professor também
-        if (nextStep === "teacher") {
-          if (teacherData.subjects.length === 0) {
-            throw new Error("Adicione pelo menos uma matéria")
-          }
-
-          const teacherResponse = await api.post("/teachers", {
-            cpf: cpf.replace(/\D/g, ""),
-            subjects: teacherData.subjects,
-            can_teach_fatec: teacherData.can_teach_fatec,
-            can_teach_etec: teacherData.can_teach_etec,
-          })
-
-          if (teacherResponse.data) {
-            toast({
-              title: "Professor cadastrado com sucesso!",
-              description: "O professor foi registrado no sistema.",
-            })
-            navigate("/teachers")
-          }
-        } else {
-          navigate("/employees")
-        }
-      }
-    } catch (error: any) {
-      console.error("Error creating employee:", error)
-      toast({
-        title: "Erro ao cadastrar funcionário",
-        description: error.response?.data?.error || error.response?.data?.message || error.message,
-        variant: "destructive",
+    if (ok) {
+      toast.success("Funcionário cadastrado", {
+        description: "Matrícula " + form.values.registration_number,
       })
-    } finally {
-      setLoading(false)
+      queryClient.invalidateQueries({ queryKey: ["employees"] })
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] })
+      navigate("/employees")
     }
   }
+
+  const selectedRole = roles.data?.find((role) => String(role.id) === form.values.role_id)
 
   return (
-    <div className="space-y-6 animate-fade-in max-w-3xl mx-auto">
-      <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" onClick={() => navigate("/people")}>
-          <ArrowLeft className="w-5 h-5" />
-        </Button>
-        <div>
-          <h1 className="text-3xl font-bold">
-            {nextStep === "teacher" ? "Cadastrar Professor - Etapa 2" : "Cadastrar Funcionário - Etapa 2"}
-          </h1>
-          <p className="text-muted-foreground">
-            {nextStep === "teacher" ? "Complete os dados do funcionário e professor" : "Complete os dados específicos do funcionário"}
-          </p>
-        </div>
-      </div>
+    <>
+      <PageHeader
+        title="Cadastrar funcionário"
+        description="Segunda etapa: vincula matrícula e cargo a uma pessoa já cadastrada."
+        action={
+          <Button variant="outline" onClick={() => navigate(-1)}>
+            <ArrowLeft className="mr-1.5 h-4 w-4" aria-hidden />
+            Voltar
+          </Button>
+        }
+      />
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <Card className="shadow-card">
-          <CardHeader>
-            <CardTitle>Dados do Funcionário</CardTitle>
-            <CardDescription>Preencha as informações profissionais</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="cpf">CPF *</Label>
-              <Input id="cpf" value={cpf} disabled />
-            </div>
+      <form onSubmit={handleSubmit} className="max-w-3xl">
+        <Panel>
+          <FormAlert message={form.formError} />
 
-            <div className="space-y-2">
-              <Label htmlFor="registration_number">Número de Registro *</Label>
-              <Input
-                id="registration_number"
-                value={formData.registration_number}
-                onChange={(e) => handleChange("registration_number", e.target.value)}
+          <div className="space-y-4">
+            <TextField
+              label="CPF da pessoa"
+              required
+              value={form.values.cpf}
+              onChange={(value) => form.setValue("cpf", maskCpf(value))}
+              error={form.errors.cpf}
+              placeholder="000.000.000-00"
+              hint="A pessoa já precisa estar cadastrada na etapa anterior."
+            />
+
+            <FormGrid>
+              <TextField
+                label="Matrícula"
                 required
-                placeholder="Ex: 12345"
+                value={form.values.registration_number}
+                onChange={(value) => form.setValue("registration_number", value)}
+                error={form.errors.registration_number}
+                placeholder="ADM001"
               />
-            </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="role_id">Cargo *</Label>
-              <Select value={formData.role_id} onValueChange={(v) => handleChange("role_id", v)}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione o cargo" />
-                </SelectTrigger>
-                <SelectContent>
-                  {roles.map((role) => (
-                    <SelectItem key={role.id} value={role.id.toString()}>
-                      {role.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="admission_date">Data de Admissão</Label>
-              <Input
-                id="admission_date"
-                type="date"
-                value={formData.admission_date}
-                onChange={(e) => handleChange("admission_date", e.target.value)}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="active">Status *</Label>
-              <Select
-                value={formData.active ? "active" : "inactive"}
-                onValueChange={(v) => handleChange("active", v === "active")}
+              <FormField
+                label="Cargo"
+                required
+                error={form.errors.role_id}
+                hint={selectedRole?.description ?? undefined}
               >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="active">Ativo</SelectItem>
-                  <SelectItem value="inactive">Inativo</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </CardContent>
-        </Card>
-
-        {nextStep === "teacher" && (
-          <Card className="shadow-card">
-            <CardHeader>
-              <CardTitle>Dados do Professor</CardTitle>
-              <CardDescription>Informações específicas para ensino</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="subjects">Matérias *</Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="subjects"
-                    value={currentSubject}
-                    onChange={(e) => setCurrentSubject(e.target.value)}
-                    onKeyPress={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault()
-                        handleAddSubject()
-                      }
-                    }}
-                    placeholder="Digite uma matéria e pressione Enter"
-                  />
-                  <Button type="button" onClick={handleAddSubject} variant="outline">
-                    Adicionar
-                  </Button>
-                </div>
-                {teacherData.subjects.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    {teacherData.subjects.map((subject) => (
-                      <div key={subject} className="flex items-center gap-1 bg-primary/10 px-2 py-1 rounded">
-                        <span className="text-sm">{subject}</span>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleRemoveSubject(subject)}
-                          className="h-4 w-4 p-0"
-                        >
-                          ×
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
+                {({ id }) => (
+                  <Select
+                    value={form.values.role_id}
+                    onValueChange={(value) => form.setValue("role_id", value)}
+                    disabled={roles.isLoading}
+                  >
+                    <SelectTrigger id={id}>
+                      <SelectValue
+                        placeholder={roles.isLoading ? "Carregando cargos..." : "Escolhe o cargo"}
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {roles.data?.map((role) => (
+                        <SelectItem key={role.id} value={String(role.id)}>
+                          {role.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 )}
-              </div>
+              </FormField>
+            </FormGrid>
 
-              <div className="space-y-2">
-                <Label>Pode lecionar em:</Label>
-                <div className="flex gap-4">
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="can_teach_fatec"
-                      checked={teacherData.can_teach_fatec}
-                      onCheckedChange={(checked) =>
-                        setTeacherData((prev) => ({ ...prev, can_teach_fatec: checked === true }))
-                      }
-                    />
-                    <Label htmlFor="can_teach_fatec" className="cursor-pointer">
-                      FATEC
-                    </Label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="can_teach_etec"
-                      checked={teacherData.can_teach_etec}
-                      onCheckedChange={(checked) =>
-                        setTeacherData((prev) => ({ ...prev, can_teach_etec: checked === true }))
-                      }
-                    />
-                    <Label htmlFor="can_teach_etec" className="cursor-pointer">
-                      ETEC
-                    </Label>
-                  </div>
+            <FormGrid>
+              <FormField label="Data de admissão" error={form.errors.admission_date}>
+                {({ id, describedBy, invalid }) => (
+                  <Input
+                    id={id}
+                    type="date"
+                    value={form.values.admission_date}
+                    onChange={(event) => form.setValue("admission_date", event.target.value)}
+                    aria-describedby={describedBy}
+                    aria-invalid={invalid}
+                  />
+                )}
+              </FormField>
+
+              <div className="flex items-end pb-1.5">
+                <div className="flex items-center gap-2.5">
+                  <Switch
+                    id="employee-active"
+                    checked={form.values.active}
+                    onCheckedChange={(checked) => form.setValue("active", checked)}
+                  />
+                  <Label htmlFor="employee-active" className="cursor-pointer">
+                    Funcionário ativo
+                  </Label>
                 </div>
               </div>
-            </CardContent>
-          </Card>
-        )}
+            </FormGrid>
 
-        <div className="flex gap-4">
-          <Button type="button" variant="outline" onClick={() => navigate("/people")}>
-            Cancelar
-          </Button>
-          <Button type="submit" className="gradient-primary" disabled={loading}>
-            {loading ? "Salvando..." : "Finalizar Cadastro"}
-          </Button>
-        </div>
+            <p className="rounded-md border border-border bg-muted/40 p-2.5 text-[0.8125rem] text-muted-foreground">
+              Coordenador, funcionário e inspetor têm login no sistema web. A senha
+              temporária vai pro e-mail cadastrado na pessoa, e ela define a definitiva no
+              primeiro acesso.
+            </p>
+          </div>
+
+          <FormActions>
+            <Button type="button" variant="ghost" asChild>
+              <Link to="/people/create">Cadastrar a pessoa antes</Link>
+            </Button>
+            <Button type="submit" disabled={form.submitting}>
+              {form.submitting ? "Cadastrando..." : "Cadastrar funcionário"}
+            </Button>
+          </FormActions>
+        </Panel>
       </form>
-    </div>
+    </>
   )
 }
-

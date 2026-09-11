@@ -1,149 +1,139 @@
-import type React from "react"
-import { useState } from "react"
-import { useNavigate, useSearchParams } from "react-router-dom"
+/**
+ * CreateVisitor.tsx - A segunda etapa do cadastro de um visitante
+ * # Pra que serve?
+ * - Registrar a que a pessoa veio e quem na casa responde por ela
+ * - Exigir o responsável, que é o que torna a visita rastreável
+ * Feito por: Arthur Roberto Weege Pontes
+ * Versão: 2.0.0
+ * Data: 2026-09-10
+ * Alterações:
+ * - v1.0.0 (2025-08-26): Primeira versão
+ * - v2.0.0 (2026-09-10): Reescrita com erro por campo
+ */
+
+import { Link, useNavigate } from "react-router-dom"
 import { ArrowLeft } from "lucide-react"
+import { useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
+import { api } from "@/lib/api"
+import { useApiForm } from "@/hooks/useApiForm"
+import { maskCpf } from "@/lib/format"
+import { PageHeader, Panel } from "@/components/data/Primitives"
+import { FormActions, FormField, FormGrid, TextField } from "@/components/form/FormField"
+import { FormAlert } from "@/components/form/FormAlert"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
-import { api } from "@/services/api"
-import { useToast } from "@/hooks/use-toast"
 
 export default function CreateVisitor() {
-  const [searchParams] = useSearchParams()
-  const cpf = searchParams.get("cpf") || ""
   const navigate = useNavigate()
-  const { toast } = useToast()
-  const [loading, setLoading] = useState(false)
-  const [formData, setFormData] = useState({
+  const queryClient = useQueryClient()
+
+  const form = useApiForm({
+    cpf: "",
     company: "",
     visit_reason: "",
     responsible_employee_cpf: "",
   })
 
-  const handleChange = (field: string, value: any) => {
-    setFormData((prev) => ({ ...prev, [field]: value }))
-  }
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault()
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-
-    try {
-      if (!cpf) {
-        throw new Error("CPF não encontrado")
-      }
-
-      if (!formData.responsible_employee_cpf || !formData.responsible_employee_cpf.trim()) {
-        toast({
-          title: "Erro",
-          description: "CPF do funcionário responsável é obrigatório",
-          variant: "destructive",
-        })
-        setLoading(false)
-        return
-      }
-
-      const visitorData = {
-        cpf: cpf.replace(/\D/g, ""),
-        company: formData.company || undefined,
-        visit_reason: formData.visit_reason || undefined,
-        responsible_employee_cpf: formData.responsible_employee_cpf.replace(/\D/g, ""),
-      }
-
-      const response = await api.post("/visitors", visitorData)
-
-      if (response.data) {
-        toast({
-          title: "Visitante cadastrado com sucesso!",
-          description: "O visitante foi registrado no sistema.",
-        })
-        navigate("/visitors")
-      }
-    } catch (error: any) {
-      console.error("Error creating visitor:", error)
-      toast({
-        title: "Erro ao cadastrar visitante",
-        description: error.response?.data?.error || error.response?.data?.message || error.message,
-        variant: "destructive",
+    const ok = await form.submit(async (values) => {
+      await api.post("/visitors", {
+        cpf: values.cpf,
+        responsible_employee_cpf: values.responsible_employee_cpf,
+        ...(values.company.trim() ? { company: values.company.trim() } : {}),
+        ...(values.visit_reason.trim() ? { visit_reason: values.visit_reason.trim() } : {}),
       })
-    } finally {
-      setLoading(false)
+    })
+
+    if (ok) {
+      toast.success("Visitante cadastrado")
+      queryClient.invalidateQueries({ queryKey: ["visitors"] })
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] })
+      navigate("/visitors")
     }
   }
 
   return (
-    <div className="space-y-6 animate-fade-in max-w-3xl mx-auto">
-      <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" onClick={() => navigate("/people")}>
-          <ArrowLeft className="w-5 h-5" />
-        </Button>
-        <div>
-          <h1 className="text-3xl font-bold">Cadastrar Visitante - Etapa 2</h1>
-          <p className="text-muted-foreground">Complete os dados específicos do visitante</p>
-        </div>
-      </div>
+    <>
+      <PageHeader
+        title="Cadastrar visitante"
+        description="Segunda etapa: o motivo da visita e o funcionário responsável."
+        action={
+          <Button variant="outline" onClick={() => navigate(-1)}>
+            <ArrowLeft className="mr-1.5 h-4 w-4" aria-hidden />
+            Voltar
+          </Button>
+        }
+      />
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <Card className="shadow-card">
-          <CardHeader>
-            <CardTitle>Dados do Visitante</CardTitle>
-            <CardDescription>Preencha as informações da visita</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="cpf">CPF *</Label>
-              <Input id="cpf" value={cpf} disabled />
-            </div>
+      <form onSubmit={handleSubmit} className="max-w-3xl">
+        <Panel>
+          <FormAlert message={form.formError} />
 
-            <div className="space-y-2">
-              <Label htmlFor="company">Empresa</Label>
-              <Input
-                id="company"
-                value={formData.company}
-                onChange={(e) => handleChange("company", e.target.value)}
-                placeholder="Nome da empresa (se aplicável)"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="visit_reason">Motivo da Visita</Label>
-              <Textarea
-                id="visit_reason"
-                value={formData.visit_reason}
-                onChange={(e) => handleChange("visit_reason", e.target.value)}
-                placeholder="Descreva o motivo da visita..."
-                rows={4}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="responsible_employee_cpf">CPF do Funcionário Responsável *</Label>
-              <Input
-                id="responsible_employee_cpf"
-                value={formData.responsible_employee_cpf}
-                onChange={(e) => handleChange("responsible_employee_cpf", e.target.value)}
-                placeholder="000.000.000-00"
+          <div className="space-y-4">
+            <FormGrid>
+              <TextField
+                label="CPF do visitante"
                 required
+                value={form.values.cpf}
+                onChange={(value) => form.setValue("cpf", maskCpf(value))}
+                error={form.errors.cpf}
+                placeholder="000.000.000-00"
+                hint="A pessoa já precisa estar cadastrada como visitante."
               />
-              <p className="text-xs text-muted-foreground">
-                CPF do funcionário que será responsável por este visitante (obrigatório)
-              </p>
-            </div>
-          </CardContent>
-        </Card>
 
-        <div className="flex gap-4">
-          <Button type="button" variant="outline" onClick={() => navigate("/people")}>
-            Cancelar
-          </Button>
-          <Button type="submit" className="gradient-primary" disabled={loading}>
-            {loading ? "Salvando..." : "Finalizar Cadastro"}
-          </Button>
-        </div>
+              <TextField
+                label="CPF do funcionário responsável"
+                required
+                value={form.values.responsible_employee_cpf}
+                onChange={(value) => form.setValue("responsible_employee_cpf", maskCpf(value))}
+                error={form.errors.responsible_employee_cpf}
+                placeholder="000.000.000-00"
+                hint="Quem na unidade responde por essa visita."
+              />
+            </FormGrid>
+
+            <TextField
+              label="Empresa"
+              value={form.values.company}
+              onChange={(value) => form.setValue("company", value)}
+              error={form.errors.company}
+              maxLength={100}
+              placeholder="De onde a pessoa vem, se for o caso"
+            />
+
+            <FormField
+              label="Motivo da visita"
+              error={form.errors.visit_reason}
+              hint="Entre 5 e 200 caracteres."
+            >
+              {({ id, describedBy, invalid }) => (
+                <Textarea
+                  id={id}
+                  value={form.values.visit_reason}
+                  onChange={(event) => form.setValue("visit_reason", event.target.value)}
+                  maxLength={200}
+                  rows={3}
+                  aria-describedby={describedBy}
+                  aria-invalid={invalid}
+                  placeholder="Reunião com a coordenação sobre o estágio"
+                />
+              )}
+            </FormField>
+          </div>
+
+          <FormActions>
+            <Button type="button" variant="ghost" asChild>
+              <Link to="/people/create">Cadastrar a pessoa antes</Link>
+            </Button>
+            <Button type="submit" disabled={form.submitting}>
+              {form.submitting ? "Cadastrando..." : "Cadastrar visitante"}
+            </Button>
+          </FormActions>
+        </Panel>
       </form>
-    </div>
+    </>
   )
 }
-

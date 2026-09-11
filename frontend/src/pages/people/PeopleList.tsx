@@ -1,278 +1,227 @@
-import { useState, useEffect } from "react"
-import { useNavigate } from "react-router-dom"
-import { Plus, Search, Filter, Eye } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Badge } from "@/components/ui/badge"
-import { DialogDetails } from "@/components/ui/dialog-details"
-import { api } from "@/services/api"
-import type { Person } from "../../types"
-import { useToast } from "@/hooks/use-toast"
+/**
+ * PeopleList.tsx - O cadastro central: toda pessoa da unidade, de qualquer perfil
+ * # Pra que serve?
+ * - Encontrar uma pessoa por nome, e-mail ou CPF sem saber o perfil dela
+ * - Servir de porta pro cadastro em duas etapas (primeiro a pessoa, depois o perfil)
+ * Feito por: Arthur Roberto Weege Pontes
+ * Versão: 2.0.0
+ * Data: 2026-09-10
+ * Alterações:
+ * - v1.0.0 (2025-08-18): Primeira versão da listagem
+ * - v2.0.0 (2026-09-10): Reescrita. A versão antiga pedia page_size=1000, que a API
+ *                        recusa, então a tela nunca carregava: agora a paginação é
+ *                        do servidor e a busca também.
+ */
+
+import { useState } from "react"
+import { Link } from "react-router-dom"
+import { Plus, Trash2 } from "lucide-react"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
+import { api, apiErrorMessage } from "@/lib/api"
 import { useUnitCode } from "@/contexts/AuthContext"
+import { usePagedList } from "@/hooks/usePagedList"
+import { formatCpf, orDash } from "@/lib/format"
+import { labelOf, PERSON_TYPE_LABELS } from "@/lib/labels"
+import { PERSON_TYPES, type PersonSummary, type PersonType } from "@/types/api"
+import { PageHeader, PersonCell, StatusBadge } from "@/components/data/Primitives"
+import { Column, DataTable } from "@/components/data/DataTable"
+import { Pagination } from "@/components/data/Pagination"
+import { Toolbar } from "@/components/data/Toolbar"
+import { Button } from "@/components/ui/button"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+
+/** Valor do filtro "todos", já que o Select do Radix não aceita item de valor vazio. */
+const ALL = "all"
 
 export default function PeopleList() {
-  const [people, setPeople] = useState<Person[]>([])
-  const [loading, setLoading] = useState(true)
-  const [searchTerm, setSearchTerm] = useState("")
-  const [typeFilter, setTypeFilter] = useState<string>("all")
-  const [selectedPerson, setSelectedPerson] = useState<Person | null>(null)
-  const [detailsOpen, setDetailsOpen] = useState(false)
-  const navigate = useNavigate()
-  const { toast } = useToast()
-
-  // Unidade do usuário logado: é o filtro de toda listagem
   const unitCode = useUnitCode()
+  const queryClient = useQueryClient()
 
-  useEffect(() => {
-    // Enquanto o perfil não chegou a gente não sabe qual unidade consultar
-    if (!unitCode) return
-    loadPeople()
-  }, [typeFilter, unitCode])
+  const [type, setType] = useState<string>(ALL)
+  const [pendingDelete, setPendingDelete] = useState<PersonSummary | null>(null)
 
+  const list = usePagedList<PersonSummary>({
+    queryKey: "people",
+    endpoint: "/people",
+    itemsKey: "people",
+    enabled: Boolean(unitCode),
+    params: {
+      unit_code: unitCode ?? "",
+      type: type === ALL ? undefined : type,
+    },
+  })
 
-  const loadPeople = async () => {
-    try {
-      setLoading(true)
+  const remove = useMutation({
+    mutationFn: async (person: PersonSummary) => {
+      await api.delete("/people", { data: { cpf: person.cpf } })
+    },
+    onSuccess: (_, person) => {
+      toast.success("Pessoa removida", { description: person.full_name })
+      // A remoção mexe em várias listas (aluno some da de alunos também)
+      queryClient.invalidateQueries()
+      setPendingDelete(null)
+    },
+    onError: (error) => {
+      toast.error(apiErrorMessage(error, "Não consegui remover essa pessoa."))
+    },
+  })
 
-
-      const params: any = {
-        unit_code: unitCode,
-        page: "1",
-        page_size: "1000",
-      }
-
-      if (typeFilter !== "all") {
-        params.type = typeFilter
-      }
-
-      const response = await api.get("/people", { params })
-
-      const data = response.data?.people || response.data || []
-
-      if (!Array.isArray(data)) {
-        console.warn("Data is not an array, received:", typeof data)
-        setPeople([])
-      } else {
-        setPeople(
-          data.map((person: any) => ({
-            ...person,
-            unit_name: person.registration_unit?.name || "Sem unidade",
-            unit_code: person.registration_unit?.unit_code || "",
-          })),
-        )
-      }
-    } catch (error: any) {
-      console.error("Error loading people:", error)
-
-      let errorMessage = "Erro desconhecido"
-      if (error.response?.status === 400) {
-        errorMessage = `Erro de validação: ${error.response?.data?.error || "Parâmetros inválidos"}`
-      } else if (error.code === "ECONNABORTED" || error.message.includes("timeout")) {
-        errorMessage = "Timeout - Backend não respondeu em tempo. Verifique se está rodando em http://localhost:2077"
-      } else if (error.response?.data?.message) {
-        errorMessage = error.response.data.message
-      } else if (error.message) {
-        errorMessage = error.message
-      }
-
-      toast({
-        title: "Erro ao carregar pessoas",
-        description: errorMessage,
-        variant: "destructive",
-      })
-
-      setPeople([])
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const filteredPeople = people.filter(
-    (person) =>
-      person.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      person.cpf.includes(searchTerm) ||
-      person.email.toLowerCase().includes(searchTerm.toLowerCase()),
-  )
-
-  const getPersonTypeBadge = (type: string) => {
-    const badges = {
-      student: <Badge className="bg-primary">Aluno</Badge>,
-      employee: <Badge className="bg-amber-600">Funcionário</Badge>, // darker amber instead of secondary
-      visitor: <Badge className="bg-yellow-500">Visitante</Badge>,
-      teacher: <Badge className="bg-blue-500">Professor</Badge>,
-      coordinator: <Badge className="bg-purple-500">Coordenador</Badge>,
-      inspector: <Badge className="bg-green-500">Inspetor</Badge>,
-    }
-    return badges[type as keyof typeof badges] || <Badge>{type}</Badge>
-  }
-
-  const getUnitName = (person: any): string => {
-    if (person.registration_unit?.name) {
-      return person.registration_unit.name
-    }
-    return "Sem unidade"
-  }
-
-  const handleViewDetails = (person: Person, e: React.MouseEvent) => {
-    e.stopPropagation()
-    setSelectedPerson(person)
-    fetchPersonDetails(person)
-  }
-
-  const [selectedDetails, setSelectedDetails] = useState<any | null>(null)
-
-  const fetchPersonDetails = async (person: Person) => {
-    try {
-      const res = await api.post("/people/get-people", { cpf: person.cpf })
-      setSelectedDetails(res.data)
-    } catch (error) {
-      setSelectedDetails(null)
-    } finally {
-      setDetailsOpen(true)
-    }
-  }
-
-  const getPersonTypeLabel = (type: string) => {
-    const labels: Record<string, string> = {
-      student: "Aluno",
-      employee: "Funcionário",
-      visitor: "Visitante",
-      teacher: "Professor",
-      coordinator: "Coordenador",
-      inspector: "Inspetor",
-    }
-    return labels[type] || type
-  }
+  const columns: Column<PersonSummary>[] = [
+    {
+      key: "person",
+      header: "Pessoa",
+      cell: (row) => <PersonCell name={row.full_name} cpf={row.cpf} />,
+    },
+    {
+      key: "type",
+      header: "Perfil",
+      cell: (row) => (
+        <StatusBadge tone="neutral">{labelOf(PERSON_TYPE_LABELS, row.type)}</StatusBadge>
+      ),
+    },
+    {
+      key: "email",
+      header: "E-mail",
+      hideBelow: "md",
+      cell: (row) => <span className="text-muted-foreground">{orDash(row.email)}</span>,
+    },
+    {
+      key: "cpf",
+      header: "CPF",
+      hideBelow: "lg",
+      cell: (row) => <span className="identifier">{formatCpf(row.cpf)}</span>,
+    },
+    {
+      key: "unit",
+      header: "Unidade",
+      hideBelow: "xl",
+      cell: (row) => (
+        <span className="identifier text-muted-foreground">
+          {row.registration_unit?.unit_code ?? "—"}
+        </span>
+      ),
+    },
+    {
+      key: "actions",
+      header: <span className="sr-only">Ações</span>,
+      align: "right",
+      width: "3.5rem",
+      cell: (row) => (
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="text-muted-foreground hover:text-destructive"
+          onClick={() => setPendingDelete(row)}
+          aria-label={"Remover " + row.full_name}
+        >
+          <Trash2 className="h-4 w-4" aria-hidden />
+        </Button>
+      ),
+    },
+  ]
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="heading-xl">Gestão de Pessoas</h1>
-          <p className="section-description">Gerencie alunos, funcionários e visitantes</p>
-        </div>
-        <Button onClick={() => navigate("/people/create")} className="btn-gradient">
-          <Plus className="mr-2 w-4 h-4" />
-          Nova Pessoa
-        </Button>
-      </div>
+    <>
+      <PageHeader
+        title="Pessoas"
+        description="Todo mundo cadastrado na sua unidade, de qualquer perfil."
+        action={
+          <Button asChild>
+            <Link to="/people/create">
+              <Plus className="mr-1.5 h-4 w-4" aria-hidden />
+              Cadastrar pessoa
+            </Link>
+          </Button>
+        }
+      />
 
-      <Card className="glass-card shadow-card">
-        <CardHeader>
-          <CardTitle>Filtros</CardTitle>
-          <CardDescription>Busque e filtre pessoas cadastradas</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex gap-4">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                placeholder="Buscar por nome, CPF ou e-mail..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-9"
-              />
-            </div>
-            <Select value={typeFilter} onValueChange={setTypeFilter}>
-              <SelectTrigger className="w-[200px]">
-                <Filter className="mr-2 w-4 h-4" />
-                <SelectValue placeholder="Tipo" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos</SelectItem>
-                <SelectItem value="student">Alunos</SelectItem>
-                <SelectItem value="employee">Funcionários</SelectItem>
-                <SelectItem value="teacher">Professores</SelectItem>
-                <SelectItem value="visitor">Visitantes</SelectItem>
-                <SelectItem value="coordinator">Coordenadores</SelectItem>
-                <SelectItem value="inspector">Inspetores</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-4">
-        {loading ? (
-          <div className="grid gap-4 md:grid-cols-2">
-            {[...Array(4)].map((_, i) => (
-              <Card key={i} className="p-6">
-                <div className="flex items-center gap-3 mb-4">
-                  <Skeleton className="w-10 h-10 rounded-lg" />
-                  <div className="flex-1">
-                    <Skeleton className="h-4 w-40" />
-                    <Skeleton className="h-3 w-24 mt-2" />
-                  </div>
-                </div>
-                <Skeleton className="h-3 w-full" />
-                <Skeleton className="h-3 w-3/4 mt-2" />
-              </Card>
+      <Toolbar search={list.search} onSearchChange={list.setSearch}>
+        <Select value={type} onValueChange={setType}>
+          <SelectTrigger className="w-[10.5rem]" aria-label="Filtrar por perfil">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Todos os perfis</SelectItem>
+            {PERSON_TYPES.map((personType) => (
+              <SelectItem key={personType} value={personType}>
+                {PERSON_TYPE_LABELS[personType as PersonType]}
+              </SelectItem>
             ))}
-          </div>
-        ) : filteredPeople.length === 0 ? (
-          <Card className="p-8 text-center">
-            <p className="text-muted-foreground">Nenhuma pessoa encontrada</p>
-          </Card>
-        ) : (
-          filteredPeople.map((person) => (
-            <Card key={person.id} className="glass-card shadow-card transition-smooth tilt-hover">
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
-                      <h3 className="text-lg font-semibold">{person.full_name}</h3>
-                      {getPersonTypeBadge(person.type)}
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                      CPF: {person.cpf} • E-mail: {person.email}
-                    </p>
-                    <p className="text-sm text-muted-foreground">Unidade: {getUnitName(person)}</p>
-                    {person.phone && <p className="text-sm text-muted-foreground">Telefone: {person.phone}</p>}
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={(e) => handleViewDetails(person, e)}
-                  >
-                    <Eye className="mr-2 w-4 h-4" />
-                    Ver Detalhes
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))
-        )}
-      </div>
+          </SelectContent>
+        </Select>
+      </Toolbar>
 
-      {selectedPerson && (
-        <DialogDetails
-          open={detailsOpen}
-          onOpenChange={setDetailsOpen}
-          title={`Detalhes de ${selectedDetails?.full_name || selectedPerson.full_name}`}
-          description="Informações completas da pessoa"
-          details={[
-            { label: "Nome Completo", value: selectedDetails?.full_name || selectedPerson.full_name },
-            { label: "CPF", value: selectedDetails?.cpf || selectedPerson.cpf },
-            { label: "E-mail", value: selectedDetails?.email || selectedPerson.email || "Não informado" },
-            { label: "Tipo", value: getPersonTypeLabel(selectedDetails?.type || selectedPerson.type) },
-            { label: "Telefone", value: selectedDetails?.phone || selectedPerson.phone || "Não informado" },
-            {
-              label: "Data de Nascimento",
-              value: (selectedDetails?.birth_date || selectedPerson.birth_date)
-                ? new Date(selectedDetails?.birth_date || selectedPerson.birth_date as any).toLocaleDateString("pt-BR")
-                : "Não informado",
-            },
-            { label: "Unidade", value: selectedDetails?.registration_unit?.name || getUnitName(selectedPerson) },
-            {
-              label: "Tipo de Unidade Principal",
-              value: (selectedDetails?.main_unit_type || selectedPerson.main_unit_type) === "Fatec" ? "FATEC" : "ETEC",
-            },
-          ]}
-        />
-      )}
-    </div>
+      <DataTable
+        columns={columns}
+        rows={list.rows}
+        rowKey={(row) => row.id}
+        isLoading={list.isLoading}
+        isFetching={list.isFetching}
+        isError={list.isError}
+        error={list.error}
+        onRetry={list.refetch}
+        emptyTitle={list.search ? "Nenhuma pessoa encontrada" : "Nenhuma pessoa cadastrada"}
+        emptyDescription={
+          list.search
+            ? "Tenta outro nome, e-mail ou CPF."
+            : "Comece cadastrando a primeira pessoa da unidade."
+        }
+      />
+
+      <Pagination
+        page={list.page}
+        pageSize={list.pageSize}
+        total={list.total}
+        totalPages={list.totalPages}
+        onPageChange={list.setPage}
+        onPageSizeChange={list.setPageSize}
+        noun="pessoa"
+        nounPlural="pessoas"
+        disabled={list.isFetching}
+      />
+
+      <AlertDialog open={Boolean(pendingDelete)} onOpenChange={(open) => !open && setPendingDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remover {pendingDelete?.full_name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Isso apaga também o perfil dela (aluno, funcionário, visitante) e as digitais
+              registradas. Não dá pra desfazer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={remove.isPending}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => {
+                // Sem isso o diálogo fecha antes da requisição terminar
+                event.preventDefault()
+                if (pendingDelete) remove.mutate(pendingDelete)
+              }}
+              disabled={remove.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {remove.isPending ? "Removendo..." : "Remover"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   )
 }

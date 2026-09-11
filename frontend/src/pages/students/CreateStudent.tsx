@@ -1,181 +1,196 @@
-import type React from "react"
-import { useState, useEffect } from "react"
-import { useNavigate, useSearchParams } from "react-router-dom"
+/**
+ * CreateStudent.tsx - A segunda etapa do cadastro de um aluno
+ * # Pra que serve?
+ * - Pendurar o perfil de aluno (RM, período, curso) numa pessoa que já existe
+ * - Deixar claro que a pessoa precisa estar cadastrada antes
+ * Feito por: Arthur Roberto Weege Pontes
+ * Versão: 2.0.0
+ * Data: 2026-09-10
+ * Alterações:
+ * - v1.0.0 (2025-08-21): Primeira versão
+ * - v2.0.0 (2026-09-10): Reescrita com erro por campo e atalho pra primeira etapa
+ */
+
+import { Link, useNavigate } from "react-router-dom"
 import { ArrowLeft } from "lucide-react"
+import { useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
+import { api } from "@/lib/api"
+import { useApiForm } from "@/hooks/useApiForm"
+import { maskCpf } from "@/lib/format"
+import { PERIOD_LABELS, STUDENT_STATUS_LABELS } from "@/lib/labels"
+import { PERIODS, STUDENT_STATUSES, type Period, type StudentStatus } from "@/types/api"
+import { PageHeader, Panel } from "@/components/data/Primitives"
+import { FormActions, FormField, FormGrid, TextField } from "@/components/form/FormField"
+import { FormAlert } from "@/components/form/FormAlert"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { api } from "@/services/api"
-import { useToast } from "@/hooks/use-toast"
-import type { PeriodEnum, StudentStatusEnum } from "@/types"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
 export default function CreateStudent() {
-  const [searchParams] = useSearchParams()
-  const cpf = searchParams.get("cpf") || ""
   const navigate = useNavigate()
-  const { toast } = useToast()
-  const [loading, setLoading] = useState(false)
-  const [formData, setFormData] = useState({
+  const queryClient = useQueryClient()
+
+  const form = useApiForm({
+    cpf: "",
     rm: "",
-    period: "morning" as PeriodEnum,
+    period: "morning" as Period,
     course: "",
     class: "",
     responsible: "",
-    status: "active" as StudentStatusEnum,
+    status: "active" as StudentStatus,
   })
 
-  const handleChange = (field: string, value: any) => {
-    setFormData((prev) => ({ ...prev, [field]: value }))
-  }
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault()
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-
-    try {
-      if (!cpf) {
-        throw new Error("CPF não encontrado")
-      }
-
-      const studentData = {
-        cpf: cpf.replace(/\D/g, ""),
-        rm: formData.rm,
-        period: formData.period,
-        course: formData.course || undefined,
-        class: formData.class || undefined,
-        responsible: formData.responsible || undefined,
-        status: formData.status,
-      }
-
-      const response = await api.post("/students", studentData)
-
-      if (response.data) {
-        toast({
-          title: "Aluno cadastrado com sucesso!",
-          description: "O estudante foi registrado no sistema.",
-        })
-        navigate("/students")
-      }
-    } catch (error: any) {
-      console.error("Error creating student:", error)
-      toast({
-        title: "Erro ao cadastrar aluno",
-        description: error.response?.data?.error || error.response?.data?.message || error.message,
-        variant: "destructive",
+    const ok = await form.submit(async (values) => {
+      await api.post("/students", {
+        cpf: values.cpf,
+        rm: values.rm.trim(),
+        period: values.period,
+        status: values.status,
+        // Campos opcionais só vão quando têm conteúdo: string vazia é rejeitada
+        ...(values.course.trim() ? { course: values.course.trim() } : {}),
+        ...(values.class.trim() ? { class: values.class.trim() } : {}),
+        ...(values.responsible.trim() ? { responsible: values.responsible.trim() } : {}),
       })
-    } finally {
-      setLoading(false)
+    })
+
+    if (ok) {
+      toast.success("Aluno cadastrado", { description: "RM " + form.values.rm })
+      queryClient.invalidateQueries({ queryKey: ["students"] })
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] })
+      navigate("/students")
     }
   }
 
   return (
-    <div className="space-y-6 animate-fade-in max-w-3xl mx-auto">
-      <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" onClick={() => navigate("/people")}>
-          <ArrowLeft className="w-5 h-5" />
-        </Button>
-        <div>
-          <h1 className="text-3xl font-bold">Cadastrar Aluno - Etapa 2</h1>
-          <p className="text-muted-foreground">Complete os dados específicos do estudante</p>
-        </div>
-      </div>
+    <>
+      <PageHeader
+        title="Cadastrar aluno"
+        description="Segunda etapa: vincula o RM e a turma a uma pessoa já cadastrada."
+        action={
+          <Button variant="outline" onClick={() => navigate(-1)}>
+            <ArrowLeft className="mr-1.5 h-4 w-4" aria-hidden />
+            Voltar
+          </Button>
+        }
+      />
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <Card className="shadow-card">
-          <CardHeader>
-            <CardTitle>Dados do Aluno</CardTitle>
-            <CardDescription>Preencha as informações acadêmicas do estudante</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="cpf">CPF *</Label>
-              <Input id="cpf" value={cpf} disabled />
-            </div>
+      <form onSubmit={handleSubmit} className="max-w-3xl">
+        <Panel>
+          <FormAlert message={form.formError} />
 
-            <div className="space-y-2">
-              <Label htmlFor="rm">RM (Registro de Matrícula) *</Label>
-              <Input
-                id="rm"
-                value={formData.rm}
-                onChange={(e) => handleChange("rm", e.target.value)}
+          <div className="space-y-4">
+            <TextField
+              label="CPF da pessoa"
+              required
+              value={form.values.cpf}
+              onChange={(value) => form.setValue("cpf", maskCpf(value))}
+              error={form.errors.cpf}
+              placeholder="000.000.000-00"
+              hint="A pessoa já precisa estar cadastrada na etapa anterior."
+            />
+
+            <FormGrid>
+              <TextField
+                label="RM"
                 required
-                placeholder="Ex: 12345"
+                value={form.values.rm}
+                // A API só aceita dígitos no RM: barrar aqui evita um 400 previsível
+                onChange={(value) => form.setValue("rm", value.replace(/\D/g, ""))}
+                error={form.errors.rm}
+                placeholder="23130"
+                hint="Só números. O registro de matrícula é único no sistema."
               />
-            </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="period">Período *</Label>
-              <Select value={formData.period} onValueChange={(v) => handleChange("period", v)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="morning">Manhã</SelectItem>
-                  <SelectItem value="afternoon">Tarde</SelectItem>
-                  <SelectItem value="night">Noite</SelectItem>
-                  <SelectItem value="integral">Integral</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+              <FormField label="Período" required error={form.errors.period}>
+                {({ id }) => (
+                  <Select
+                    value={form.values.period}
+                    onValueChange={(value) => form.setValue("period", value as Period)}
+                  >
+                    <SelectTrigger id={id}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PERIODS.map((period) => (
+                        <SelectItem key={period} value={period}>
+                          {PERIOD_LABELS[period]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </FormField>
+            </FormGrid>
 
-            <div className="space-y-2">
-              <Label htmlFor="course">Curso</Label>
-              <Input
-                id="course"
-                value={formData.course}
-                onChange={(e) => handleChange("course", e.target.value)}
-                placeholder="Ex: Informática"
+            <FormGrid>
+              <TextField
+                label="Curso"
+                value={form.values.course}
+                onChange={(value) => form.setValue("course", value)}
+                error={form.errors.course}
+                placeholder="Desenvolvimento de Sistemas"
               />
-            </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="class">Turma</Label>
-              <Input
-                id="class"
-                value={formData.class}
-                onChange={(e) => handleChange("class", e.target.value)}
-                placeholder="Ex: 1º A"
+              <TextField
+                label="Turma"
+                value={form.values.class}
+                onChange={(value) => form.setValue("class", value)}
+                error={form.errors.class}
+                placeholder="3 DS"
               />
-            </div>
+            </FormGrid>
 
-            <div className="space-y-2 md:col-span-2">
-              <Label htmlFor="responsible">Responsável</Label>
-              <Input
-                id="responsible"
-                value={formData.responsible}
-                onChange={(e) => handleChange("responsible", e.target.value)}
-                placeholder="Nome do responsável (se menor de idade)"
+            <FormGrid>
+              <TextField
+                label="Responsável"
+                value={form.values.responsible}
+                onChange={(value) => form.setValue("responsible", value)}
+                error={form.errors.responsible}
+                maxLength={100}
+                hint="Quem responde pelo aluno, quando ele é menor de idade."
               />
-            </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="status">Status *</Label>
-              <Select value={formData.status} onValueChange={(v) => handleChange("status", v)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="active">Ativo</SelectItem>
-                  <SelectItem value="inactive">Inativo</SelectItem>
-                  <SelectItem value="transferred">Transferido</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </CardContent>
-        </Card>
+              <FormField label="Situação" error={form.errors.status}>
+                {({ id }) => (
+                  <Select
+                    value={form.values.status}
+                    onValueChange={(value) => form.setValue("status", value as StudentStatus)}
+                  >
+                    <SelectTrigger id={id}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {STUDENT_STATUSES.map((status) => (
+                        <SelectItem key={status} value={status}>
+                          {STUDENT_STATUS_LABELS[status]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </FormField>
+            </FormGrid>
+          </div>
 
-        <div className="flex gap-4">
-          <Button type="button" variant="outline" onClick={() => navigate("/people")}>
-            Cancelar
-          </Button>
-          <Button type="submit" className="gradient-primary" disabled={loading}>
-            {loading ? "Salvando..." : "Finalizar Cadastro"}
-          </Button>
-        </div>
+          <FormActions>
+            <Button type="button" variant="ghost" asChild>
+              <Link to="/people/create">Cadastrar a pessoa antes</Link>
+            </Button>
+            <Button type="submit" disabled={form.submitting}>
+              {form.submitting ? "Cadastrando..." : "Cadastrar aluno"}
+            </Button>
+          </FormActions>
+        </Panel>
       </form>
-    </div>
+    </>
   )
 }
-
