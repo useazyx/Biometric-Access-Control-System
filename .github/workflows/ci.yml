@@ -1,0 +1,114 @@
+# ==========================================================
+# ci.yml - Confere o projeto a cada push e pull request
+# Pra que serve?
+# - Garantir que o backend e o frontend compilam sem erro de tipo
+# - Rodar o smoke test da API, que não precisa de banco
+# - Conferir que o módulo Python não tem erro de sintaxe
+# Feito por: Arthur Roberto Weege Pontes
+# Versão: 1.0.0
+# Data: 2026-09-09
+#
+# O módulo C++ não entra aqui porque depende da API serial do Windows.
+# ==========================================================
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Um push novo cancela a execução anterior do mesmo branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (tipos e smoke test)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Instalar dependências
+        working-directory: backend
+        run: npm ci
+
+      - name: Gerar o client do Prisma
+        working-directory: backend
+        # O typecheck precisa dos tipos que o Prisma gera a partir do schema
+        run: npx prisma generate
+
+      - name: Conferir os tipos
+        working-directory: backend
+        run: npm run typecheck
+
+      - name: Compilar
+        working-directory: backend
+        run: npx tsc
+
+      - name: Smoke test das rotas
+        working-directory: backend
+        # Sobe a API em memória com o inject() do Fastify: não precisa de banco
+        env:
+          JWT_SECRET: segredo-de-ci-com-mais-de-32-caracteres-aqui
+        run: npm run smoke
+
+  frontend:
+    name: Frontend (tipos, lint e build)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Instalar dependências
+        working-directory: frontend
+        run: npm ci
+
+      - name: Conferir os tipos
+        working-directory: frontend
+        run: npm run typecheck
+
+      - name: Lint
+        working-directory: frontend
+        # continue-on-error porque o projeto ainda tem avisos herdados do
+        # scaffolding inicial; o objetivo é ver a lista, não travar o CI
+        continue-on-error: true
+        run: npm run lint
+
+      - name: Build
+        working-directory: frontend
+        run: npx vite build
+
+  python:
+    name: Python (sintaxe)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependências
+        working-directory: python
+        run: pip install -r requirements.txt
+
+      - name: Conferir a sintaxe de todos os arquivos
+        working-directory: python
+        run: python -m compileall -q .
