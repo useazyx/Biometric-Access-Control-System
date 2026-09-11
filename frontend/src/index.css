@@ -1,0 +1,603 @@
+/**
+ * index.css - O design system do sistema: cores, tipografia e utilitários
+ * # Pra que serve?
+ * - Definir a identidade visual num lugar só, em tokens que o Tailwind consome
+ * - Dar cor com significado pros estados de acesso (autorizado, negado, pendente)
+ * - Funcionar bem no tema claro e no escuro, sem cor chumbada no meio do componente
+ * Feito por: Arthur Roberto Weege Pontes
+ * Versão: 2.0.0
+ * Data: 2026-09-09
+ * Alterações:
+ * - v1.0.0 (2025-08-10): Tokens padrão do shadcn/ui
+ * - v2.0.0 (2026-09-09): Identidade própria (ciano de scanner sobre azul profundo) em vez
+ *                        do slate padrão. As cores indigo que estavam chumbadas nas
+ *                        animações passaram a vir dos tokens, as definições duplicadas
+ *                        foram unificadas e tudo respeita prefers-reduced-motion.
+ *
+ * Regra da casa: TODA cor mora aqui, em HSL, como token. Componente não escreve cor na mão.
+ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* ------------------------------------------------------------------
+   * TEMA CLARO (é o padrão, e é a base de tudo)
+   * A identidade é "luz de scanner": um ciano-petróleo profundo sobre
+   * superfícies bem claras e levemente frias.
+   * ------------------------------------------------------------------ */
+  :root {
+    /* Superfícies */
+    --background: 200 33% 98%;
+    --foreground: 201 39% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 201 39% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 201 39% 12%;
+
+    /* Cor da marca: ciano-petróleo profundo */
+    --primary: 191 84% 25%;
+    --primary-foreground: 195 60% 98%;
+
+    /* Superfície secundária, pra blocos que não devem competir com o conteúdo */
+    --secondary: 197 32% 94%;
+    --secondary-foreground: 201 39% 18%;
+
+    /* Texto e fundo de apoio (legendas, descrições, linhas zebradas) */
+    --muted: 197 30% 95%;
+    --muted-foreground: 200 14% 42%;
+
+    /* Destaque suave, usado em hover e item selecionado */
+    --accent: 189 62% 92%;
+    --accent-foreground: 191 84% 20%;
+
+    /* Ação destrutiva (excluir) */
+    --destructive: 0 72% 45%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Traços e foco */
+    --border: 200 24% 88%;
+    --input: 200 24% 88%;
+    --ring: 189 85% 38%;
+
+    --radius: 0.625rem;
+
+    /* ----------------------------------------------------------------
+     * Cores com significado no domínio do sistema.
+     * Um log de acesso não é "verde bonito": é AUTORIZADO. Ter token
+     * pra isso evita cada tela inventar um verde diferente.
+     * ---------------------------------------------------------------- */
+    --authorized: 152 62% 34%;
+    --authorized-foreground: 0 0% 100%;
+    --denied: 352 70% 45%;
+    --denied-foreground: 0 0% 100%;
+    --pending: 35 92% 42%;
+    --pending-foreground: 30 50% 8%;
+    /* Entrada e saída no histórico de acesso */
+    --entry: 189 84% 32%;
+    --exit: 262 60% 52%;
+
+    /* Barra lateral */
+    --sidebar-background: 199 34% 15%;
+    --sidebar-foreground: 195 24% 88%;
+    --sidebar-primary: 187 84% 48%;
+    --sidebar-primary-foreground: 199 45% 10%;
+    --sidebar-accent: 199 30% 22%;
+    --sidebar-accent-foreground: 195 30% 96%;
+    --sidebar-border: 199 26% 24%;
+    --sidebar-ring: 187 84% 48%;
+
+    /* Sombras: uma escala só, pra não ter 8 sombras diferentes pelo app */
+    --shadow-sm: 0 1px 2px 0 hsl(201 39% 12% / 0.06);
+    --shadow-md: 0 2px 8px -2px hsl(201 39% 12% / 0.1), 0 1px 3px -1px hsl(201 39% 12% / 0.06);
+    --shadow-lg: 0 12px 32px -8px hsl(201 39% 12% / 0.14), 0 4px 8px -4px hsl(201 39% 12% / 0.08);
+  }
+
+  /* ------------------------------------------------------------------
+   * TEMA ESCURO
+   * Só redefine os tokens. Nada de cor nova aparecendo aqui do nada:
+   * se um token só existe no escuro, o claro quebra.
+   * ------------------------------------------------------------------ */
+  .dark {
+    --background: 200 30% 7%;
+    --foreground: 195 22% 94%;
+
+    --card: 200 26% 10%;
+    --card-foreground: 195 22% 94%;
+
+    --popover: 200 26% 11%;
+    --popover-foreground: 195 22% 94%;
+
+    /* No escuro o ciano precisa ser mais claro pra ter contraste */
+    --primary: 187 82% 52%;
+    --primary-foreground: 200 40% 8%;
+
+    --secondary: 200 20% 17%;
+    --secondary-foreground: 195 22% 92%;
+
+    --muted: 200 18% 16%;
+    --muted-foreground: 198 14% 65%;
+
+    --accent: 199 30% 21%;
+    --accent-foreground: 187 82% 72%;
+
+    --destructive: 0 62% 52%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 200 18% 22%;
+    --input: 200 18% 22%;
+    --ring: 187 82% 52%;
+
+    --authorized: 152 55% 46%;
+    --authorized-foreground: 152 60% 8%;
+    --denied: 352 68% 58%;
+    --denied-foreground: 0 0% 100%;
+    --pending: 38 90% 55%;
+    --pending-foreground: 30 60% 8%;
+    --entry: 187 82% 52%;
+    --exit: 262 70% 68%;
+
+    --sidebar-background: 200 30% 9%;
+    --sidebar-foreground: 195 20% 86%;
+    --sidebar-primary: 187 82% 52%;
+    --sidebar-primary-foreground: 200 40% 8%;
+    --sidebar-accent: 200 22% 18%;
+    --sidebar-accent-foreground: 195 22% 94%;
+    --sidebar-border: 200 18% 20%;
+    --sidebar-ring: 187 82% 52%;
+
+    --shadow-sm: 0 1px 2px 0 hsl(0 0% 0% / 0.3);
+    --shadow-md: 0 2px 8px -2px hsl(0 0% 0% / 0.4), 0 1px 3px -1px hsl(0 0% 0% / 0.3);
+    --shadow-lg: 0 12px 32px -8px hsl(0 0% 0% / 0.5), 0 4px 8px -4px hsl(0 0% 0% / 0.35);
+  }
+
+  /* ------------------------------------------------------------------
+   * Variações de cor que o usuário escolhe no seletor de paleta.
+   * Mexem só na cor da marca; o resto do sistema continua igual.
+   * ------------------------------------------------------------------ */
+  :root.theme-violet {
+    --primary: 258 74% 42%;
+    --primary-foreground: 0 0% 100%;
+    --accent: 258 60% 94%;
+    --accent-foreground: 258 74% 32%;
+    --ring: 258 74% 52%;
+    --sidebar-primary: 258 82% 66%;
+    --sidebar-ring: 258 82% 66%;
+  }
+  .dark.theme-violet {
+    --primary: 258 82% 68%;
+    --primary-foreground: 258 50% 10%;
+    --accent: 258 30% 22%;
+    --accent-foreground: 258 82% 80%;
+    --ring: 258 82% 68%;
+  }
+
+  :root.theme-emerald {
+    --primary: 162 74% 27%;
+    --primary-foreground: 0 0% 100%;
+    --accent: 162 55% 92%;
+    --accent-foreground: 162 74% 20%;
+    --ring: 162 70% 38%;
+    --sidebar-primary: 158 70% 48%;
+    --sidebar-ring: 158 70% 48%;
+  }
+  .dark.theme-emerald {
+    --primary: 158 68% 48%;
+    --primary-foreground: 162 60% 8%;
+    --accent: 162 28% 20%;
+    --accent-foreground: 158 68% 72%;
+    --ring: 158 68% 48%;
+  }
+
+  :root.theme-rose {
+    --primary: 346 72% 40%;
+    --primary-foreground: 0 0% 100%;
+    --accent: 346 62% 94%;
+    --accent-foreground: 346 72% 30%;
+    --ring: 346 72% 50%;
+    --sidebar-primary: 346 82% 62%;
+    --sidebar-ring: 346 82% 62%;
+  }
+  .dark.theme-rose {
+    --primary: 346 80% 62%;
+    --primary-foreground: 346 60% 10%;
+    --accent: 346 28% 22%;
+    --accent-foreground: 346 80% 78%;
+    --ring: 346 80% 62%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    /* Compensa o cabeçalho fixo quando alguém abre um link com âncora */
+    scroll-padding-top: 5rem;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+
+  /* Números alinhados em coluna nas tabelas: CPF, RM e data ficam legíveis */
+  th,
+  td {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Títulos um pouco mais apertados que o padrão, que fica largo demais */
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply tracking-tight;
+    text-wrap: balance;
+  }
+
+  /* Foco visível em tudo que dá pra alcançar pelo teclado (acessibilidade) */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+
+  /* Barra de rolagem discreta, seguindo o tema */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: hsl(var(--muted));
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 999px;
+    border: 2px solid hsl(var(--muted));
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.5);
+  }
+}
+
+@layer components {
+  /* ------------------------------------------------------------------
+   * Peças reaproveitadas nas telas. Ficam como componente (não utility)
+   * porque cada uma é uma decisão de design, não um atalho de classe.
+   * ------------------------------------------------------------------ */
+
+  /* Cartão padrão: sobe um pouco a sombra no hover pra dar noção de clicável */
+  .shadow-card {
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow 0.2s ease, border-color 0.2s ease;
+  }
+  .shadow-card:hover {
+    box-shadow: var(--shadow-md);
+  }
+
+  /* Botão/bloco com a cor da marca. Discreto de propósito: gradiente sutil,
+     porque gradiente forte em botão pequeno suja a leitura do texto. */
+  .gradient-primary {
+    @apply bg-primary text-primary-foreground;
+    background-image: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--primary) / 0.86) 100%);
+  }
+  .gradient-primary:hover {
+    background-image: linear-gradient(135deg, hsl(var(--primary) / 0.92) 0%, hsl(var(--primary) / 0.78) 100%);
+  }
+
+  .btn-gradient {
+    @apply gradient-primary inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium;
+    box-shadow: var(--shadow-sm);
+  }
+  .btn-gradient:hover {
+    box-shadow: var(--shadow-md);
+  }
+
+  /* Cartão translúcido, pra sobrepor conteúdo (usado nas telas de marketing) */
+  .glass-card {
+    @apply rounded-xl border border-border/60 bg-card/75 backdrop-blur-md;
+    box-shadow: var(--shadow-md);
+  }
+
+  /* Escala de título, pra toda página começar do mesmo tamanho */
+  .heading-xl {
+    @apply text-2xl font-semibold tracking-tight sm:text-3xl;
+  }
+  .heading-lg {
+    @apply text-xl font-semibold tracking-tight sm:text-2xl;
+  }
+  .section-description {
+    @apply text-sm text-muted-foreground;
+  }
+
+  /* Etiquetas de estado. Agora saem dos tokens semânticos, então significam
+     a mesma coisa em toda tela e acompanham o tema claro/escuro. */
+  .badge-soft-green,
+  .badge-authorized {
+    @apply border font-medium;
+    background-color: hsl(var(--authorized) / 0.14);
+    color: hsl(var(--authorized));
+    border-color: hsl(var(--authorized) / 0.28);
+  }
+
+  .badge-denied {
+    @apply border font-medium;
+    background-color: hsl(var(--denied) / 0.14);
+    color: hsl(var(--denied));
+    border-color: hsl(var(--denied) / 0.28);
+  }
+
+  .badge-pending {
+    @apply border font-medium;
+    background-color: hsl(var(--pending) / 0.16);
+    color: hsl(var(--pending));
+    border-color: hsl(var(--pending) / 0.3);
+  }
+
+  .badge-soft-blue {
+    @apply border font-medium;
+    background-color: hsl(var(--primary) / 0.12);
+    color: hsl(var(--primary));
+    border-color: hsl(var(--primary) / 0.26);
+  }
+
+  .badge-soft-gray {
+    @apply border font-medium;
+    background-color: hsl(var(--muted));
+    color: hsl(var(--muted-foreground));
+    border-color: hsl(var(--border));
+  }
+
+  /* Tabela: linha destaca no hover e cabeçalho gruda ao rolar */
+  .table-modern tbody tr {
+    @apply transition-colors;
+  }
+  .table-modern tbody tr:hover {
+    background-color: hsl(var(--muted) / 0.5);
+  }
+
+  /* Identificador técnico (CPF, RM, código de unidade, template).
+     Monoespaçado porque a pessoa vai comparar caractere por caractere. */
+  .identifier {
+    @apply font-mono text-[0.8125rem] tracking-tight;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Bloco de "não tem nada aqui ainda", pra lista vazia não parecer erro */
+  .empty-state {
+    @apply flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border px-6 py-12 text-center;
+  }
+}
+
+@layer utilities {
+  .transition-smooth {
+    @apply transition-all duration-200 ease-out;
+  }
+
+  /* Deixa a área clicável do ícone grande o suficiente pro dedo (44px) */
+  .tap-target {
+    @apply relative;
+  }
+  .tap-target::after {
+    content: "";
+    @apply absolute left-1/2 top-1/2 h-11 w-11 -translate-x-1/2 -translate-y-1/2;
+  }
+}
+
+/* ====================================================================
+ * ANIMAÇÕES
+ * Todas curtas e discretas. O que era brilho e giro demais saiu:
+ * numa tela que a pessoa usa o dia inteiro, animação chamativa cansa.
+ * ==================================================================== */
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.28s ease-out both;
+}
+
+/* Entrada de página: só um fade curto, sem blur nem cortina diagonal */
+.page-enter {
+  animation: fadeIn 0.24s ease-out both;
+}
+
+/* Fundo com a cor da marca, bem suave, pra tela de login e capa */
+.bg-animated {
+  background-image: radial-gradient(
+      ellipse 80% 60% at 50% 0%,
+      hsl(var(--primary) / 0.14) 0%,
+      transparent 70%
+    ),
+    linear-gradient(180deg, hsl(var(--background)) 0%, hsl(var(--secondary) / 0.6) 100%);
+}
+
+/* Textura levíssima, pra superfície grande não ficar chapada */
+.noise-overlay {
+  @apply relative;
+}
+.noise-overlay::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Levanta o cartão 2px no hover. Era um tilt 3D, que embaralhava o texto. */
+.tilt-hover {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.tilt-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+}
+
+/* --- Animação da digital (tela de login e leitor) ---
+   As cores vêm do token --primary, então acompanham o tema e a paleta escolhida. */
+.fingerprint-path,
+.fp-ring {
+  stroke-dasharray: 520;
+  stroke-dashoffset: 520;
+  animation: fpDraw 1.1s ease-out forwards;
+}
+
+@keyframes fpDraw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.fp-icon path {
+  stroke: hsl(var(--primary));
+  stroke-width: 2.2px;
+  fill: none;
+  stroke-dasharray: 120;
+  stroke-dashoffset: 120;
+  animation: fpDraw 0.9s ease-out forwards;
+}
+
+.fp-icon path:nth-child(2) {
+  animation-delay: 0.05s;
+}
+.fp-icon path:nth-child(3) {
+  animation-delay: 0.1s;
+}
+.fp-icon path:nth-child(4) {
+  animation-delay: 0.15s;
+}
+.fp-icon path:nth-child(5) {
+  animation-delay: 0.2s;
+}
+.fp-icon path:nth-child(6) {
+  animation-delay: 0.25s;
+}
+.fp-icon path:nth-child(7) {
+  animation-delay: 0.3s;
+}
+.fp-icon path:nth-child(8) {
+  animation-delay: 0.35s;
+}
+.fp-icon path:nth-child(9) {
+  animation-delay: 0.4s;
+}
+.fp-icon path:nth-child(10) {
+  animation-delay: 0.45s;
+}
+
+/* Brilho de "lendo a digital" */
+.fp-glow {
+  animation: fpGlow 1.8s ease-in-out infinite alternate;
+}
+
+@keyframes fpGlow {
+  from {
+    box-shadow: 0 0 0 0 hsl(var(--primary) / 0.18);
+  }
+  to {
+    box-shadow: 0 0 32px 6px hsl(var(--primary) / 0.16);
+  }
+}
+
+/* Linha do leitor passando de cima pra baixo */
+.fp-scan {
+  background: linear-gradient(180deg, transparent 0%, hsl(var(--primary) / 0.18) 50%, transparent 100%);
+  animation: fpScan 1.8s ease-in-out infinite;
+}
+
+@keyframes fpScan {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(100%);
+  }
+}
+
+.fp-text {
+  animation: fadeIn 0.36s ease-out both 0.5s;
+}
+
+/* Riscar o "check" de sucesso */
+.check-anim {
+  stroke-dasharray: 24;
+  stroke-dashoffset: 24;
+  animation: fpDraw 0.45s ease-out forwards;
+}
+
+/* --- Aparecer conforme rola a página --- */
+.reveal-on-scroll {
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.5s ease-out, transform 0.5s ease-out;
+}
+.reveal-on-scroll.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.stagger > * {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.stagger.is-visible > * {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 0.42s ease-out, transform 0.42s ease-out;
+}
+.stagger.is-visible > *:nth-child(1) {
+  transition-delay: 0.03s;
+}
+.stagger.is-visible > *:nth-child(2) {
+  transition-delay: 0.06s;
+}
+.stagger.is-visible > *:nth-child(3) {
+  transition-delay: 0.09s;
+}
+.stagger.is-visible > *:nth-child(4) {
+  transition-delay: 0.12s;
+}
+.stagger.is-visible > *:nth-child(5) {
+  transition-delay: 0.15s;
+}
+.stagger.is-visible > *:nth-child(6) {
+  transition-delay: 0.18s;
+}
+
+/* ====================================================================
+ * Quem pediu menos movimento no sistema operacional recebe menos movimento.
+ * Isso não é enfeite: animação demais causa desconforto de verdade em
+ * algumas pessoas, e o sistema tem que continuar utilizável.
+ * ==================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .reveal-on-scroll,
+  .stagger > * {
+    opacity: 1;
+    transform: none;
+  }
+
+  .tilt-hover:hover {
+    transform: none;
+  }
+}
